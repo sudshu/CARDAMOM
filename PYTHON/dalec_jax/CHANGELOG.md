@@ -3,6 +3,32 @@
 Newest first. Every agentic session appends: what was attempted, what passed,
 what FAILED (so it is not blindly retried), environment changes.
 
+## 2026-08-23 — Session 1 (P3, same session)
+
+- Full forward model ported (model/dalec_1100.py): VegK prederive in numpy
+  (bit-identical libm), init block, literal step transcription with the
+  4-pass carbon removals, post-overflow q_ly1/q_ly3 ordering into the
+  energy fluxes, and the q_ly1_overflow bug reproduced. lax.scan carries
+  (pools, alive); the isfinite break emits the poisoned step then zeros.
+- **L4 green: 22 passed.** 94/120 fixtures pointwise (mixed ≤1e-10 or abs
+  ≤1e-12; break step + zero tail exact), 26 chaos-certified.
+- **Findings (do not re-derive):**
+  - DALEC_1100 is ULP-chaotic for ~29% of fixture draws: the C diverges
+    from ITSELF under 1-ULP parameter dithers (all-89-param, K=8) with
+    onsets bracketing the JAX onsets — JAX-vs-C is indistinguishable from
+    C's own ULP sensitivity. Certification lives in chaos_cert.json and
+    MUST use the identical pools+fluxes criterion as the test (pools-only
+    onsets misclassify flux-flip fixtures 10/73/111).
+  - The early "failures" at t=0-2 were hydraulic_mortality_factor
+    cancellation noise (|Δ| ~1e-16 on values ~1e-15) — hence the 1e-12
+    absolute escape in the element criterion.
+  - The HMF exact-equality gate (LF1+LF2)==2 never flipped across all 120
+    fixtures — the chaos seeds are the smooth erfc/exp ULP + the
+    dlambda_dt sign discretization, not the equality gate.
+  - CBF time variable is named 'time' (READ_NETCDF maps it to TIME_INDEX).
+- Perf note (unoptimized): CPU vmap(120) ≈ 15 ms/trajectory vs C 0.196 ms —
+  scan dispatch dominates on CPU; do not quote before P6 GPU/batching work.
+
 ## 2026-08-23 — Session 1 (P2, same session)
 
 - All 16 leaf modules ported (constants.py + modules/*) and L1 green:

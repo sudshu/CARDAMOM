@@ -38,12 +38,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
       (XLA rewrites x/c→x·(1/c), (x/c1)·c2→x·(c2/c1)); enforced in
       tests/conftest.py before jax import. See TOLERANCES.md "Fusion findings".
 
-## P3 — step body + trajectory (gate: L3 ≤ 1e-13; L4 ≤ 1e-10 on 104 fixtures incl. exact break indices)
-- [ ] types.py PyTrees (carry, params, forcing, config)
-- [ ] model/dalec_1100.py — VegK prederive (numpy, libm-exact), init block
-- [ ] Step body: literal transcription of D1100.c:459-1142 (sub-block order preserved; 4-pass updates)
-- [ ] lax.scan wrapper + alive-flag freeze-to-zero
-- [ ] tests/test_checkpoints.py (L3), tests/test_trajectory.py (L4)
+## P3 — step body + trajectory — DONE 2026-08-23 (gate redefined, see TOLERANCES.md "Trajectory chaos")
+- [x] model/dalec_1100.py — VegK prederive (numpy), init block, literal
+      680-line step transcription (4-pass updates, q_ly1 overflow bug
+      reproduced, post-overflow q ordering into energy fluxes), lax.scan +
+      alive-flag freeze-to-zero
+- [x] L4 GREEN on all 120 fixtures: 94 pointwise-clean (≤1e-10 mixed or
+      ≤1e-12 abs, break step + zero tail exact), 26 chaos-certified
+      (divergence onset within the C's own 1-ULP self-divergence envelope,
+      measured by K=8 all-parameter dither runs of the C oracle)
+- [x] Chaos certification integrated into gen_fixtures.py
+      (trajectories/chaos_cert.json, same criterion code as the test)
+- [~] L3 tap checkpoints SUPERSEDED (rationale in TOLERANCES.md); ORACLE_TAP
+      design shelved as future debugging tool
+- [ ] types.py PyTrees — deferred to P5 (only needed for likelihood config)
 
 ## P4 — EDCs (gate: L2+L5 booleans exact on 4000 posterior + 10k prior)
 - [ ] edcs/prerun.py — 7 parameter-only EDCs

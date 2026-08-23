@@ -74,9 +74,42 @@ exp alone. Huge raw-ULP counts on outputs approaching 0 (denormal
 LEAF/NONLEAF mortality factors, |Δ| ≤ 1e-290) are absorbed by the RMS floor
 and are physically meaningless.
 
+## Trajectory chaos (2026-08-23, L4 bring-up)
+
+DALEC_1100 has a positive effective Lyapunov exponent through the
+phenology–carbon loop for a subset of parameter draws: sub-1e-12 seeds
+(erfc/exp ULP, or discrete sign flips like the `dlambda_dt > 0` leaf-fall
+branch at |dlambda_dt| ~ 1e-14) grow exponentially (~0.1–0.15/step) into
+macroscopic trajectory differences. Pointwise 240-step agreement at 1e-10 is
+therefore UNACHIEVABLE for those draws by ANY implementation that is not
+bit-identical in every transcendental — including the C against itself.
+
+Measured proof: perturbing ALL 89 parameters by 1 ULP (K=8 seeded dithers,
+run through the C oracle) makes the C diverge from itself under the L4
+element criterion in 35/120 fixtures, with onsets that bracket the JAX
+divergence onsets (e.g. fixture 11: JAX t=58, C-self 58,58,58,…,60;
+fixture 113: 8 everywhere; fixture 115: 10 vs 10,10,11). The JAX-vs-C
+difference is statistically indistinguishable from the C's own 1-ULP
+sensitivity.
+
+L4 gate (tests/test_trajectory.py):
+- element: |Δ| ≤ 1e-10·max(|c|, RMS_var) OR |Δ| ≤ 1e-12 (absolute escape for
+  cancellation-noise diagnostics, e.g. hydraulic_mortality_factor ~ 1e-15).
+- fixture: CLEAN (all elements pass + break step and calloc-zero tail exact)
+  or CHAOS-CERTIFIED (JAX onset ≥ C self-onset − 10 steps).
+- guards: every C-1-ULP-insensitive fixture must be CLEAN; clean count ≥
+  insensitive count. Result at bring-up: 94 clean, 26 certified, 0 failures.
+
+The chaos certificates are regenerated with the goldens
+(trajectories/chaos_cert.json) — same criterion code path as the test.
+
 Notes.
 - Equivalence tests are CPU-only by policy (GPU runs are for performance,
   not reference comparison); conftest sets JAX_PLATFORMS=cpu.
+- L3 tap checkpoints were superseded: module-level bit-exactness (L1) plus
+  chaos-certified L4 localizes any regression to a step and variable without
+  intermediate taps. The ORACLE_TAP design remains available as a debugging
+  tool if a future L4 failure resists localization.
 - erfc error budget over a trajectory: ≤4.1e-15 rel per step into the
   phenology memory state; linear accumulation over 240 steps ≈ 1e-12,
   two orders inside the 1e-10 L4 bar. The fdlibm-erfc escape hatch stays

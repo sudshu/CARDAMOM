@@ -193,6 +193,60 @@ def gen_trajectory_fixtures(rng: np.random.Generator) -> dict:
          str(tdir / "pools.bin"), str(tdir / "fluxes.bin")])
     run([str(ORACLE), "mlf", str(cbf), str(pf), str(tdir / "mlf.bin")])
 
+    # Chaos certification: for each fixture, run K all-parameter 1-ULP
+    # dithers through the C oracle and record the earliest step at which the
+    # dithered C diverges from the base C under the L4 element criterion.
+    # A fixture whose JAX-vs-C divergence onset is >= (this onset - margin)
+    # is behaving exactly like a 1-ULP-perturbed C (see TOLERANCES.md).
+    K = 8
+    rng_d = np.random.default_rng(SEED + 1)
+    dith = np.repeat(fix[:, None, :], K, axis=1)
+    up = rng_d.random(dith.shape) < 0.5
+    dith = np.where(up, np.nextafter(dith, np.inf), np.nextafter(dith, -np.inf))
+    dfile = tdir / "_dither.bin"
+    dith.reshape(-1, fix.shape[1]).astype("<f8").tofile(dfile)
+    run([str(ORACLE), "trajectory", str(cbf), str(dfile),
+         str(tdir / "_dither_pools.bin"), str(tdir / "_dither_fluxes.bin")])
+    base_p = np.fromfile(tdir / "pools.bin").reshape(fix.shape[0], -1, I.NOPOOLS)
+    base_f = np.fromfile(tdir / "fluxes.bin").reshape(fix.shape[0], -1, I.NOFLUXES)
+    dpools = np.fromfile(tdir / "_dither_pools.bin").reshape(
+        fix.shape[0], K, -1, I.NOPOOLS)
+    dfluxes = np.fromfile(tdir / "_dither_fluxes.bin").reshape(
+        fix.shape[0], K, -1, I.NOFLUXES)
+
+    def _fail_rows(c, j):
+        fin = np.isfinite(c)
+        with np.errstate(all="ignore"):
+            rms = np.sqrt(np.nanmean(np.where(fin, c, np.nan) ** 2, axis=0))
+            rms = np.nan_to_num(rms, nan=1.0)
+            mixed = np.abs(j - c) / np.maximum(
+                np.abs(np.where(fin, c, 0.0)), np.maximum(rms, 1e-300))
+        okel = (mixed <= 1e-10) | (np.abs(j - c) <= 1e-12)
+        fail = np.where(fin & np.isfinite(j), ~okel,
+                        ~((~np.isfinite(c)) & (~np.isfinite(j))))
+        return fail.any(axis=1)
+
+    def _tdiv(cp_, jp_, cf_, jf_):
+        # SAME criterion as tests/test_trajectory.py: pools AND fluxes
+        rows = _fail_rows(cp_, jp_) | np.concatenate(
+            [_fail_rows(cf_, jf_), [False]])
+        return int(np.argmax(rows)) if rows.any() else -1
+
+    onsets = []
+    for s in range(fix.shape[0]):
+        ts = [_tdiv(base_p[s], dpools[s, m], base_f[s], dfluxes[s, m])
+              for m in range(K)]
+        ts = [t for t in ts if t >= 0]
+        onsets.append(min(ts) if ts else -1)
+    (tdir / "chaos_cert.json").write_text(json.dumps(
+        {"K": K, "criterion": "mixed<=1e-10 or abs<=1e-12",
+         "min_self_divergence_step": onsets}, indent=1))
+    for fdel in (dfile, tdir / "_dither_pools.bin", tdir / "_dither_fluxes.bin"):
+        fdel.unlink()
+    n_chaotic = sum(1 for t in onsets if t >= 0)
+    print(f"  chaos certification: {n_chaotic}/{fix.shape[0]} fixtures are "
+          f"1-ULP-sensitive in C itself")
+
     pools = np.fromfile(tdir / "pools.bin").reshape(fix.shape[0], -1, I.NOPOOLS)
     n_broken = int((~np.isfinite(pools.reshape(fix.shape[0], -1))
                     .all(axis=1)).sum())
