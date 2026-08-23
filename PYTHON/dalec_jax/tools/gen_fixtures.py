@@ -260,6 +260,40 @@ def gen_trajectory_fixtures(rng: np.random.Generator) -> dict:
             "sha_mlf": sha(tdir / "mlf.bin")}
 
 
+def gen_posterior_golden() -> dict:
+    """L7 goldens: full-posterior mlf rows + K=4 per-sample 1-ULP dither P
+    values from the C oracle (chaos certificates for the P-level gate)."""
+    import netCDF4
+
+    root = PKG / "../../.."
+    cbf = (root / "runs/mdf_1100_full/example_1100.cbf.nc").resolve()
+    pdir = GOLDEN / "posterior"
+    pdir.mkdir(parents=True, exist_ok=True)
+
+    with netCDF4.Dataset(root / "runs/mdf_1100_full/assim_1100.cbr") as ds:
+        post = np.array(ds["Parameters"][:])
+    pf = pdir / "params.bin"
+    post.astype("<f8").tofile(pf)
+    run([str(ORACLE), "mlf", str(cbf), str(pf), str(pdir / "mlf.bin")])
+
+    K = 8
+    rng = np.random.default_rng(SEED + 2)
+    dith = np.repeat(post[:, None, :], K, axis=1)
+    up = rng.random(dith.shape) < 0.5
+    dith = np.where(up, np.nextafter(dith, np.inf), np.nextafter(dith, -np.inf))
+    dfile = pdir / "_dither.bin"
+    dith.reshape(-1, post.shape[1]).astype("<f8").tofile(dfile)
+    run([str(ORACLE), "mlf", str(cbf), str(dfile), str(pdir / "_dither_mlf.bin")])
+    row = np.fromfile(pdir / "mlf.bin").reshape(post.shape[0], -1).shape[1]
+    dP = np.fromfile(pdir / "_dither_mlf.bin").reshape(post.shape[0], K, row)[:, :, -1]
+    dP.astype("<f8").tofile(pdir / "dither_P.bin")
+    dfile.unlink(); (pdir / "_dither_mlf.bin").unlink()
+    print(f"  posterior goldens: {post.shape[0]} mlf rows + K={K} dither P")
+    return {"n": int(post.shape[0]), "K": K,
+            "sha_mlf": sha(pdir / "mlf.bin"),
+            "sha_dither_P": sha(pdir / "dither_P.bin")}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-determinism", action="store_true")
@@ -281,10 +315,12 @@ def main() -> int:
     minfo = gen_modules(manifest, rng)
     print("Trajectory/mlf goldens:")
     tinfo = gen_trajectory_fixtures(rng)
+    print("Posterior L7 goldens:")
+    pinfo = gen_posterior_golden()
 
     out = {"seed": SEED, "n_lhs": N_LHS, "fingerprint": fingerprint,
            "oracle_manifest": manifest, "modules": minfo,
-           "trajectories": tinfo}
+           "trajectories": tinfo, "posterior": pinfo}
     (GOLDEN / "manifest.json").write_text(json.dumps(out, indent=1))
     print(f"wrote {GOLDEN / 'manifest.json'}")
 

@@ -62,13 +62,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
 - [x] Quirks reproduced: state_ranges skips final pool row; D_LF_LY2
       unbounded; per-term-division means; C int-division dint stride
 
-## P5 — likelihood + posterior E2E (gate: L6+L7 green)
-- [ ] likelihood/data_prep.py — TIMESERIES_OBS_STRUCT_PREPROCESS parity (numpy, load time)
-- [ ] likelihood/obs_operators.py — 29 operators
-- [ ] likelihood/timeseries_likelihood.py — 10 opt_filter modes (static indices), 3 unc types, 3 normalizations
-- [ ] likelihood/single_obs_likelihood.py
-- [ ] likelihood/mlf2.py — DALEC_MLF2 composition (prerun gate → model → postrun → likelihood)
-- [ ] tests/test_posterior_e2e.py — all 4000 posterior samples vs `mlf`/`trajectory` oracle
+## P5 — likelihood + posterior E2E — DONE 2026-08-23 (L6+L7 green)
+- [x] likelihood/data_prep.py — exact C read/preprocess semantics (sentinels,
+      unc backfill incl. the sqrt((-9999)^2)=9999 quirk, structural quadrature)
+- [x] likelihood/__init__.py — operators for all active streams, all 10
+      opt_filter modes, 3 unc types, 2 normalizations, single-obs terms,
+      MLF2 gate composition. New BUG_COMPATs: obsope_int_div_index,
+      obsope_c3frac_unset, unused_unc_9999
+- [x] L6: 31 terms + P + EDC records + gated-row zero patterns on 120
+      fixtures (4 tests, first-run pass)
+- [x] L7: full JAX pipeline on ALL 4000 posterior samples; three-clause gate
+      (tight >=90% | both-rejected | K=8-dither chaos-certified) — 30 passed.
+      Findings: PEQ_CUE 0/0-ratio chaos for dead-vegetation samples;
+      state_ranges boolean flips at ULP bound-margins; both C-self-certified
 
 ## P6 — performance + gradient hygiene (gate: no NaN/Inf grads at 64 posterior points)
 - [ ] vmap(4000) benchmark vs 0.196 ms/traj C — CPU + A100 report
