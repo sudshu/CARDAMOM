@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dalec-jax"
+version = "0.1.0"
+description = "JAX port of CARDAMOM's DALEC_1100 with C-oracle-verified numerical equivalence"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "See CARDAMOM repository license" }
+authors = [{ name = "Sudhanshu Pandey", email = "pandeysu@caltech.edu" }]
+dependencies = [
+    # jax is pinned EXACT: the equivalence claim (TOLERANCES.md) is stamped
+    # against this version; bumping it requires a full golden regeneration
+    # and test rerun (see CLAUDE.md "toolchain drift" policy).
+    "jax==0.11.1",
+    "numpy>=2",
+    "xarray",
+    "netCDF4",
+    "scipy",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+cuda = ["jax[cuda12]==0.11.1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dalec_jax"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
