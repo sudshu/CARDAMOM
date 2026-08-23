@@ -27,5 +27,9 @@ def compute_daylight_hours(latitude, DOY):
     dec = (-23.4 * jnp.cos((360. * (DOY + 10.) / 365.) * DGCM_PI / 180.)
            * DGCM_PI / 180.)
     mult = jnp.tan(latitude * DGCM_PI / 180) * jnp.tan(dec)
-    dayl = 24. * jnp.arccos(-mult) / DGCM_PI
+    # GRADIENT HARDENING (value-identical): arccos gets a clipped operand —
+    # bit-identical for |mult| < 1 (the only region whose value is selected);
+    # the polar branches return the constants, and clipping keeps the
+    # discarded arccos finite so its NaN can't poison the backward pass.
+    dayl = 24. * jnp.arccos(-jnp.clip(mult, -1.0, 1.0)) / DGCM_PI
     return jnp.where(mult >= 1, 24.0, jnp.where(mult <= -1, 0.0, dayl))

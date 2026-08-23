@@ -20,10 +20,18 @@ def alloc_and_auto_resp_fluxes(deltat, TEMP, C_LIVE_W, C_LIVE_R, NSC, GPP, Rd,
     F_LABPROD = GPP - Rd
     NSC_PLUS_GPP_RATE = NSC / deltat + (GPP - Rd)
 
+    # GRADIENT HARDENING (value-identical, bit-exact): safe division operand
+    # plus the exact exp-overflow cutoff (see liu_an_et.py) — the C's
+    # 1/exp(x) is +0.0 above log(DBL_MAX) and unchanged bits below it.
+    LOG_DBL_MAX = 709.782712893384
+    x_nmf = NSC_PLUS_GPP_RATE / jnp.where(
+        POTENTIAL_AUTO_RESP_MAINTENANCE == 0, 1.0,
+        POTENTIAL_AUTO_RESP_MAINTENANCE)
     NONLEAF_MORTALITY_FACTOR = jnp.where(
         POTENTIAL_AUTO_RESP_MAINTENANCE == 0,
         0.0,
-        1 / jnp.exp(NSC_PLUS_GPP_RATE / POTENTIAL_AUTO_RESP_MAINTENANCE))
+        jnp.where(x_nmf > LOG_DBL_MAX, 0.0,
+                  1 / jnp.exp(jnp.minimum(x_nmf, LOG_DBL_MAX))))
 
     AUTO_RESP_MAINTENANCE = (POTENTIAL_AUTO_RESP_MAINTENANCE
                              * (1 - NONLEAF_MORTALITY_FACTOR))
@@ -34,8 +42,11 @@ def alloc_and_auto_resp_fluxes(deltat, TEMP, C_LIVE_W, C_LIVE_R, NSC, GPP, Rd,
     TOTAL_GROWTH_POT = ALLOC_FOL_POT + ALLOC_WOO_POT + ALLOC_ROO_POT
     F_LABREL_DEMAND = jnp.fmax(0.0, TOTAL_GROWTH_POT)
 
+    x_gf = F_LABREL_SUPPLY / jnp.where(F_LABREL_DEMAND != 0,
+                                       F_LABREL_DEMAND, 1.0)
     GF = jnp.where(F_LABREL_DEMAND != 0,
-                   1 / jnp.exp(F_LABREL_SUPPLY / F_LABREL_DEMAND),
+                   jnp.where(x_gf > LOG_DBL_MAX, 0.0,
+                             1 / jnp.exp(jnp.minimum(x_gf, LOG_DBL_MAX))),
                    0.0)
 
     F_LABREL_ACTUAL = F_LABREL_DEMAND * (1 - GF)

@@ -59,10 +59,19 @@ def liu_an_et(SRAD, VPD, TEMP, vcmax25, co2, beta_factor, g1, LAI, ga, VegK,
     Rd = C3_frac * Rd_C3 + (1. - C3_frac) * Rd_C4
 
     Rd_daily_potential = Rd * canopy_scale * (12.e-6) * (24. * 60. * 60.)
+    # GRADIENT HARDENING (value-identical, bit-exact): exp(x) overflows to
+    # inf exactly for x > log(DBL_MAX) = 709.782712893384, where the C's
+    # 1/exp(x) becomes +0.0. Below the cutoff the operand passes through
+    # fmin unchanged (identical bits); above it we select the same +0.0 —
+    # but exp stays finite, so no inf/inf NaN reaches the backward pass.
+    LOG_DBL_MAX = 709.782712893384
+    x_lmf = NSC / (jnp.where(Rd_daily_potential == 0, 1.0,
+                             Rd_daily_potential) * deltat)
     LEAF_MORTALITY_FACTOR = jnp.where(
         Rd_daily_potential == 0,
         0.0,
-        1 / jnp.exp(NSC / (Rd_daily_potential * deltat)))
+        jnp.where(x_lmf > LOG_DBL_MAX, 0.0,
+                  1 / jnp.exp(jnp.minimum(x_lmf, LOG_DBL_MAX))))
     OUT_Rd = Rd_daily_potential * (1 - LEAF_MORTALITY_FACTOR)
     Rd = Rd * (1 - LEAF_MORTALITY_FACTOR)
 
@@ -84,9 +93,15 @@ def liu_an_et(SRAD, VPD, TEMP, vcmax25, co2, beta_factor, g1, LAI, ga, VegK,
     petVnumB = 1.26 * (sV * SRADg) / (sV + gammaV) / lambda0 * 60 * 60
 
     gs = jnp.fmax(0.0, 1.6 * An / (co2 - ci) * LAI * 0.02405)
-    transp_active = petVnum / (sV + gammaV * (ga * (1 / ga + 1 / gs)))
+    # GRADIENT HARDENING: gs == 0 drives the C through 1/gs = inf and
+    # transp = petVnum/inf = ±0. We divide by a safe gs and select 0.0 for
+    # that case (|Δ| = 0; only the sign of zero can differ from the C),
+    # keeping the backward pass NaN-free.
+    gs_pos = gs > 0
+    transp_active = petVnum / (sV + gammaV * (ga * (1 / ga
+                                                    + 1 / jnp.where(gs_pos, gs, 1.0))))
     transp = jnp.where(jnp.logical_and(beta_factor > 0, SRAD > 0),
-                       transp_active, 0.0)
+                       jnp.where(gs_pos, transp_active, 0.0), 0.0)
     OUT_transp = transp * 24
 
     evap_scale_factpr = jnp.fmin(precip / maxPevap, 1.)

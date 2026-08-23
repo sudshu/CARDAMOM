@@ -449,6 +449,49 @@ static int cmd_mlf(const char *cbf, const char *paramfile, const char *outfile)
     return 0;
 }
 
+/* Central finite-difference gradient of the MLF log-posterior w.r.t. all
+ * parameters: the C-side baseline for "time to gradient" and an
+ * independent numerical check of the JAX autodiff. Per sample this costs
+ * 2*nopars MLF evaluations (each with per-sample buffer zeroing). Relative
+ * step hrel applied per parameter: h = hrel*|p_k| (or hrel if p_k == 0). */
+static int cmd_fdgrad(const char *cbf, const char *paramfile,
+                      const char *outfile, double hrel)
+{
+    DATA D;
+    CARDAMOM_READ_BINARY_DATA((char *)cbf, &D);
+
+    long n_samples;
+    double *pars = read_params(paramfile, D.nopars, &n_samples);
+    double *work = malloc((size_t)D.nopars * sizeof(double));
+    double *grad = malloc((size_t)D.nopars * sizeof(double));
+
+    FILE *fo = fopen(outfile, "wb");
+    if (!fo) { fprintf(stderr, "oracle_1100: cannot open %s\n", outfile); return 2; }
+
+    long n;
+    int k;
+    for (n = 0; n < n_samples; n++) {
+        const double *p0 = pars + (size_t)n * D.nopars;
+        for (k = 0; k < D.nopars; k++) {
+            double h = hrel * fabs(p0[k]);
+            if (h == 0) h = hrel;
+            memcpy(work, p0, (size_t)D.nopars * sizeof(double));
+            work[k] = p0[k] + h;
+            zero_model_buffers(&D);
+            double Pp = D.MLF(D, work);
+            work[k] = p0[k] - h;
+            zero_model_buffers(&D);
+            double Pm = D.MLF(D, work);
+            grad[k] = (Pp - Pm) / (2 * h);
+        }
+        fwrite(grad, sizeof(double), (size_t)D.nopars, fo);
+    }
+    fclose(fo);
+    fprintf(stderr, "oracle_1100: fdgrad ran %ld samples x %d params "
+            "(2 MLF evals each, hrel=%g)\n", n_samples, D.nopars, hrel);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 
 int main(int argc, char *argv[])
@@ -461,12 +504,16 @@ int main(int argc, char *argv[])
         return cmd_trajectory(argv[2], argv[3], argv[4], argv[5]);
     if (argc == 5 && strcmp(argv[1], "mlf") == 0)
         return cmd_mlf(argv[2], argv[3], argv[4]);
+    if ((argc == 5 || argc == 6) && strcmp(argv[1], "fdgrad") == 0)
+        return cmd_fdgrad(argv[2], argv[3], argv[4],
+                          argc == 6 ? atof(argv[5]) : 1e-6);
 
     fprintf(stderr,
         "usage:\n"
         "  oracle_1100 manifest\n"
         "  oracle_1100 module <NAME> <in.bin> <out.bin>\n"
         "  oracle_1100 trajectory <cbf.nc> <params.bin> <pools.bin> <fluxes.bin>\n"
-        "  oracle_1100 mlf <cbf.nc> <params.bin> <out.bin>\n");
+        "  oracle_1100 mlf <cbf.nc> <params.bin> <out.bin>\n"
+        "  oracle_1100 fdgrad <cbf.nc> <params.bin> <grads.bin> [hrel=1e-6]\n");
     return 1;
 }

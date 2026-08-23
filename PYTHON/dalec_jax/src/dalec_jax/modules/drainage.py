@@ -18,7 +18,13 @@ def drainage(sm, Qexcess, psi_field, psi_porosity, b):
     sm = jnp.where(over, 1.0, sm)
 
     delta_sm = jnp.fmax(sm - sm_field, 0.0)
-    psi = hydrofun_moi2psi(sm, psi_porosity, b)
+    # GRADIENT HARDENING (value-identical): for sm <= 0 the C's pow yields
+    # ±inf/NaN and the fmin/fmax pair clamps psi to psi_field, making the
+    # drainage factor exactly 0 (and delta_sm is 0 there anyway). We feed
+    # pow a safe operand and select psi_field for sm <= 0 — same clamped
+    # value, finite backward pass.
+    psi = hydrofun_moi2psi(jnp.where(sm > 0, sm, 1.0), psi_porosity, b)
+    psi = jnp.where(sm > 0, psi, psi_field)
 
     return excess_drainage + delta_sm * Qexcess * (
         1 - (psi_porosity - jnp.fmin(jnp.fmax(psi, psi_field), psi_porosity))

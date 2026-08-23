@@ -20,6 +20,13 @@ oracle_1100.exe: oracle_1100.c
 oracle_1100_tap.exe: oracle_1100.c
 	$(CC) -DCARDAMOM_ORACLE_TAP oracle_1100.c -o oracle_1100_tap.exe -lm $(NETCDF_LIB_FLAGS)
 
+# PERFORMANCE-ONLY build: -O2. Never use for golden generation — optimized
+# codegen (FMA contraction, vectorized libm) is not bit-identical to the
+# production -O0 numerics that the equivalence suite certifies against.
+perf: oracle_1100_O2.exe
+oracle_1100_O2.exe: oracle_1100.c
+	$(CC) -O2 oracle_1100.c -o oracle_1100_O2.exe -lm $(NETCDF_LIB_FLAGS)
+
 fingerprint:
 	@echo "cc:      $$($(CC) --version | head -1)"
 	@echo "glibc:   $$(ldd --version | head -1)"

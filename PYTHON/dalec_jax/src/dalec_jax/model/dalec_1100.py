@@ -39,6 +39,25 @@ PSI_POROSITY = -0.117 / 100          # D1100.c:330
 MINPSI = -30.0                       # D1100.c:343
 PREDERIVED_GEO_FLUX = 0.105 * 3600 * 24   # D1100.c:281
 N_PROGNOSTIC = 14                    # isfinite check covers pools 0..13
+LOG_DBL_MAX = 709.782712893384       # exp overflows to inf strictly above
+
+
+def _sigmoid_lf(u, LF):
+    """C pattern 1/(1+exp(u))*LF with a bit-exact overflow guard: for
+    u > log(DBL_MAX) the C's exp is inf and the quotient +0.0; below the
+    cutoff the operand passes through fmin unchanged. Keeps grad NaN-free."""
+    # jnp.minimum (NOT fmin): NaN operands must propagate exactly as in C
+    s = 1 / (1 + jnp.exp(jnp.minimum(u, LOG_DBL_MAX)))
+    return jnp.where(u > LOG_DBL_MAX, 0.0, s) * LF
+
+
+def _psi_clamped(sm, retention):
+    """C pattern fmax(HYDROFUN_MOI2PSI(sm, psi_porosity, b), minpsi).
+    For sm <= 0 the C's pow produces ±inf/NaN and fmax selects MINPSI; we
+    select MINPSI directly (identical value) with a safe pow operand so the
+    backward pass stays finite."""
+    psi = hydrofun_moi2psi(jnp.where(sm > 0, sm, 1.0), PSI_POROSITY, retention)
+    return jnp.where(sm > 0, jnp.fmax(psi, MINPSI), MINPSI)
 
 # forcing column order for the scan xs matrix
 MET_COLUMNS = ("SSRD", "T2M_MIN", "T2M_MAX", "CO2", "DOY", "TOTAL_PREC",
@@ -95,12 +114,9 @@ def _initial_pools(pars):
     v[S.D_SM_LY1] = hydrofun_ewt2moi(v[S.H2O_LY1], pars[P.LY1_por], pars[P.LY1_z])
     v[S.D_SM_LY2] = hydrofun_ewt2moi(v[S.H2O_LY2], pars[P.LY2_por], pars[P.LY2_z])
     v[S.D_SM_LY3] = hydrofun_ewt2moi(v[S.H2O_LY3], pars[P.LY3_por], pars[P.LY3_z])
-    v[S.D_PSI_LY1] = jnp.fmax(
-        hydrofun_moi2psi(v[S.D_SM_LY1], PSI_POROSITY, pars[P.retention]), MINPSI)
-    v[S.D_PSI_LY2] = jnp.fmax(
-        hydrofun_moi2psi(v[S.D_SM_LY2], PSI_POROSITY, pars[P.retention]), MINPSI)
-    v[S.D_PSI_LY3] = jnp.fmax(
-        hydrofun_moi2psi(v[S.D_SM_LY3], PSI_POROSITY, pars[P.retention]), MINPSI)
+    v[S.D_PSI_LY1] = _psi_clamped(v[S.D_SM_LY1], pars[P.retention])
+    v[S.D_PSI_LY2] = _psi_clamped(v[S.D_SM_LY2], pars[P.retention])
+    v[S.D_PSI_LY3] = _psi_clamped(v[S.D_SM_LY3], pars[P.retention])
 
     T1, LF1 = soil_temp_and_liquid_frac(pars[P.LY1_vhc], pars[P.LY1_z],
                                         v[S.H2O_LY1], v[S.E_LY1])
@@ -141,21 +157,21 @@ def _step(pars, deltat, LAT, prev, met_row, VegK_n):
                             (T2M_MIN - Tminmin) / (Tminmax - Tminmin)))
 
     # ---------------- water stress (490-515)
-    beta1 = 1 / (1 + jnp.exp(pars[P.beta_lgr]
-                             * (-1 * prev[S.D_PSI_LY1] / pars[P.psi_50] - 1))) \
-        * prev[S.D_LF_LY1]
-    beta2 = 1 / (1 + jnp.exp(pars[P.beta_lgr]
-                             * (-1 * prev[S.D_PSI_LY2] / pars[P.psi_50] - 1))) \
-        * prev[S.D_LF_LY2]
+    beta1 = _sigmoid_lf(pars[P.beta_lgr]
+                        * (-1 * prev[S.D_PSI_LY1] / pars[P.psi_50] - 1),
+                        prev[S.D_LF_LY1])
+    beta2 = _sigmoid_lf(pars[P.beta_lgr]
+                        * (-1 * prev[S.D_PSI_LY2] / pars[P.psi_50] - 1),
+                        prev[S.D_LF_LY2])
     beta = (beta1 * pars[P.LY1_z] + beta2 * pars[P.LY2_z] * pars[P.root_frac]) \
         / (pars[P.LY1_z] + pars[P.LY2_z] * pars[P.root_frac])
 
-    betaHMF_1 = 1 / (1 + jnp.exp(pars[P.beta_lgrHMF]
-                                 * (-1 * prev[S.D_PSI_LY1] / pars[P.psi_50HMF] - 1))) \
-        * prev[S.D_LF_LY1]
-    betaHMF_2 = 1 / (1 + jnp.exp(pars[P.beta_lgrHMF]
-                                 * (-1 * prev[S.D_PSI_LY2] / pars[P.psi_50HMF] - 1))) \
-        * prev[S.D_LF_LY2]
+    betaHMF_1 = _sigmoid_lf(pars[P.beta_lgrHMF]
+                            * (-1 * prev[S.D_PSI_LY1] / pars[P.psi_50HMF] - 1),
+                            prev[S.D_LF_LY1])
+    betaHMF_2 = _sigmoid_lf(pars[P.beta_lgrHMF]
+                            * (-1 * prev[S.D_PSI_LY2] / pars[P.psi_50HMF] - 1),
+                            prev[S.D_LF_LY2])
     betaHMF = (betaHMF_1 * pars[P.LY1_z]
                + betaHMF_2 * pars[P.LY2_z] * pars[P.root_frac]) \
         / (pars[P.LY1_z] + pars[P.LY2_z] * pars[P.root_frac])
@@ -187,8 +203,9 @@ def _step(pars, deltat, LAT, prev, met_row, VegK_n):
     transp = liu_transp
 
     transp_split = jnp.logical_or(beta1 > 0, beta2 > 0)
+    _tden = beta1 * pars[P.LY1_z] + beta2 * pars[P.LY2_z] * pars[P.root_frac]
     transp1_active = transp * beta1 * pars[P.LY1_z] \
-        / (beta1 * pars[P.LY1_z] + beta2 * pars[P.LY2_z] * pars[P.root_frac])
+        / jnp.where(transp_split, _tden, 1.0)
     fx[F.transp1] = jnp.where(transp_split, transp1_active, 0.0)
     fx[F.transp2] = jnp.where(transp_split, transp - fx[F.transp1], 0.0)
     fx[F.evap] = liu_evap
@@ -201,10 +218,14 @@ def _step(pars, deltat, LAT, prev, met_row, VegK_n):
                                  * pars[P.melt_slope], 0.0), 1.0) \
         * swe_1 * one_over_deltat
     SUBLIMATION = pars[P.sublimation_rate] * SSRD * SCFtemp
-    slf = (SNOWMELT + SUBLIMATION) * deltat / swe_1   # 0/0 -> NaN -> else branch
-    rescale = slf > 1
-    fx[F.melt] = jnp.where(rescale, SNOWMELT / slf, SNOWMELT)
-    fx[F.sublimation] = jnp.where(rescale, SUBLIMATION / slf, SUBLIMATION)
+    # (hardened: swe_1 == 0 gives SNOWMELT = SUBLIMATION = 0 and the C's
+    # slf = 0/0 = NaN selects the no-rescale branch; safe operands keep the
+    # selected values bit-identical and the backward pass finite)
+    slf = (SNOWMELT + SUBLIMATION) * deltat / jnp.where(swe_1 > 0, swe_1, 1.0)
+    rescale = jnp.logical_and(swe_1 > 0, slf > 1)
+    _slf_safe = jnp.where(rescale, slf, 1.0)
+    fx[F.melt] = jnp.where(rescale, SNOWMELT / _slf_safe, SNOWMELT)
+    fx[F.sublimation] = jnp.where(rescale, SUBLIMATION / _slf_safe, SUBLIMATION)
     swe_new = jnp.fmax(swe_1 - (fx[F.melt] + fx[F.sublimation]) * deltat, 0.0)
     fx[F.ets] = fx[F.evap] + fx[F.transp1] + fx[F.transp2] + fx[F.sublimation]
 
@@ -261,7 +282,11 @@ def _step(pars, deltat, LAT, prev, met_row, VegK_n):
     k_LY3 = hydrofun_moi2con(prev[S.D_SM_LY3], pars[P.hydr_cond], pars[P.retention])
 
     # ---------------- LY1<->LY2 transfer (709-736); q_* still pre-overflow
-    pot_xfer12 = 1000 * jnp.sqrt(k_LY1 * k_LY2) * (
+    _k12 = k_LY1 * k_LY2
+    # zero branch written as _k12 * 0.0 so a NaN product propagates as in C
+    pot_xfer12 = 1000 * jnp.where(_k12 > 0,
+                                  jnp.sqrt(jnp.where(_k12 > 0, _k12, 1.0)),
+                                  _k12 * 0.0) * (
         1e-9 * (prev[S.D_PSI_LY1] - prev[S.D_PSI_LY2])
         / (9.8 * 0.5 * (pars[P.LY1_z] + pars[P.LY2_z])) + 1)
     down12 = pot_xfer12 > 0
@@ -285,7 +310,10 @@ def _step(pars, deltat, LAT, prev, met_row, VegK_n):
     TEMPxfer_1to2 = jnp.where(down12, prev[S.D_TEMP_LY1], prev[S.D_TEMP_LY2])
 
     # ---------------- LY2<->LY3 transfer (741-768)
-    pot_xfer23 = 1000 * jnp.sqrt(k_LY2 * k_LY3) * (
+    _k23 = k_LY2 * k_LY3
+    pot_xfer23 = 1000 * jnp.where(_k23 > 0,
+                                  jnp.sqrt(jnp.where(_k23 > 0, _k23, 1.0)),
+                                  _k23 * 0.0) * (
         1e-9 * (prev[S.D_PSI_LY2] - prev[S.D_PSI_LY3])
         / (9.8 * 0.5 * (pars[P.LY2_z] + pars[P.LY3_z])) + 1)
     down23 = pot_xfer23 > 0
@@ -332,10 +360,11 @@ def _step(pars, deltat, LAT, prev, met_row, VegK_n):
 
     # ---------------- internal-energy fluxes (795-818)
     infiltemp = air_temp_k
+    _iden = PREC - SNOWFALL + fx[F.melt]
     infiltemp = jnp.where(
         fx[F.melt] > 0,
         (infiltemp - DGCM_TK0C) * (PREC - SNOWFALL)
-        / (PREC - SNOWFALL + fx[F.melt]) + DGCM_TK0C,
+        / jnp.where(fx[F.melt] > 0, _iden, 1.0) + DGCM_TK0C,
         infiltemp)
 
     fx[F.infil_e] = fx[F.infil] * internal_energy_per_liquid_h2o_unit_mass(infiltemp)
@@ -564,12 +593,9 @@ def _step(pars, deltat, LAT, prev, met_row, VegK_n):
     d_sm_ly1 = hydrofun_ewt2moi(h2o_ly1, pars[P.LY1_por], pars[P.LY1_z])
     d_sm_ly2 = hydrofun_ewt2moi(h2o_ly2, pars[P.LY2_por], pars[P.LY2_z])
     d_sm_ly3 = hydrofun_ewt2moi(h2o_ly3, pars[P.LY3_por], pars[P.LY3_z])
-    d_psi_ly1 = jnp.fmax(hydrofun_moi2psi(d_sm_ly1, PSI_POROSITY,
-                                          pars[P.retention]), MINPSI)
-    d_psi_ly2 = jnp.fmax(hydrofun_moi2psi(d_sm_ly2, PSI_POROSITY,
-                                          pars[P.retention]), MINPSI)
-    d_psi_ly3 = jnp.fmax(hydrofun_moi2psi(d_sm_ly3, PSI_POROSITY,
-                                          pars[P.retention]), MINPSI)
+    d_psi_ly1 = _psi_clamped(d_sm_ly1, pars[P.retention])
+    d_psi_ly2 = _psi_clamped(d_sm_ly2, pars[P.retention])
+    d_psi_ly3 = _psi_clamped(d_sm_ly3, pars[P.retention])
 
     # ---------------- assemble outputs
     newp = [None] * NOPOOLS
