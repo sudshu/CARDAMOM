@@ -3,6 +3,25 @@
 Newest first. Every agentic session appends: what was attempted, what passed,
 what FAILED (so it is not blindly retried), environment changes.
 
+## 2026-08-23 — Session 1 (P5+P6, same session)
+
+- P5: likelihood layer ported + L6/L7 green (30 passed). Three new
+  BUG_COMPATs (obsope_int_div_index, obsope_c3frac_unset, unused_unc_9999).
+  L7 three-clause gate over all 4000 posterior samples; K=4 dithers were
+  insufficient for 2 posterior-relevant holdouts (2523: JAX dP=-3.67 vs
+  K=16 C-dither spread [-inf,+0.19] incl -10; 3087 similar) -> posterior
+  dither battery is K=8 with a gate-instability clause. PEQ_CUE 0/0-ratio
+  chaos (MGPP->0) produces astronomically-rejected P on both sides
+  (both-rejected clause).
+- P6: benchmarks + grad scan (see plan.md). A100 full-pipeline vmap(4000)
+  = 0.029 ms/traj (6.7x one C core); CPU parity-class. grad(P) finite for
+  47/64; offender sites named; hardening deferred with value-identity
+  requirement.
+- CBF stream configs actually exercised by goldens: GPP(f0,u2+unc series),
+  LAI/ABGB(f3,u1), EWT(f0,u0,norm1), ROFF(f0,u1), SCF(f0,u0,thresh),
+  Mean_FIR/PEQ_CUE/PEQ_iniSOM singles. Filter modes 1,2,4-9 implemented
+  but NOT golden-covered — synthetic-CBF coverage is future work.
+
 ## 2026-08-23 — Session 1 (P3, same session)
 
 - Full forward model ported (model/dalec_1100.py): VegK prederive in numpy

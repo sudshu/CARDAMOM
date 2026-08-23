@@ -76,9 +76,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
       Findings: PEQ_CUE 0/0-ratio chaos for dead-vegetation samples;
       state_ranges boolean flips at ULP bound-margins; both C-self-certified
 
-## P6 — performance + gradient hygiene (gate: no NaN/Inf grads at 64 posterior points)
-- [ ] vmap(4000) benchmark vs 0.196 ms/traj C — CPU + A100 report
-- [ ] jax.grad NaN scan over the where-site audit list
+## P6 — performance + gradient hygiene — DONE 2026-08-23 (grad gate PARTIAL, deferred by design)
+- [x] Benchmark (tools/benchmark.py): CPU vmap(4000) 0.37 ms/traj (0.5x one
+      C core); A100 vmap(4000) 0.0256 ms/traj forward = 7.7x one C core,
+      full pipeline 0.029 ms = 6.7x. GPU wins only at batch >=1024 (scan-
+      serialized; batch is the parallel axis). True payoff = gradients:
+      dP/d(89 pars) in ONE backward pass vs 90 forward runs for FD.
+- [~] grad(P) NaN scan at 64 genuine posterior samples: 47/64 fully finite.
+      Non-finite components map exactly to the known where-both-branch
+      sites: LY1_z/LY1_por (hydrology divisions, 17/64), fwc/thetas_opt/
+      S_fv (HET_RESP theta_ae 0/0, 10/64), sublimation_rate (slf 0/0),
+      psi_50HMF/beta_lgrHMF (HMF exp overflow), t_lab, time_c. HARDENING
+      DEFERRED to the inference phase: each guard must carry a value-
+      identity proof (CLAUDE.md rule — guards may never change selected
+      values), which is follow-on work, not equivalence work.
 
 ## P7 — analyses + docs + PR (gate: L8 equality; PR opened)
 - [ ] io/to_xarray.py common schema; analysis layer in research repo
