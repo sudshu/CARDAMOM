@@ -3,6 +3,28 @@
 Newest first. Every agentic session appends: what was attempted, what passed,
 what FAILED (so it is not blindly retried), environment changes.
 
+## 2026-08-23 — Session 1 (P2, same session)
+
+- All 16 leaf modules ported (constants.py + modules/*) and L1 green:
+  11 bit-identical, COMPUTE_DAYLIGHT_HOURS ≤4 ULP, four exp/erfc chains
+  within mixed-criterion bounds (worst: LIU transp 2.6e-13 — exp ULP
+  through (co2−ci) conditioning; bound 1e-12).
+- **Repair-loop findings (do not re-derive):**
+  - jit ≠ eager numerically: XLA's `algsimp` pass rewrites div-by-const to
+    mul-by-reciprocal and folds (x/c1)·c2 → x·(c2/c1) — confirmed in
+    optimized HLO of the INITIALIZE_INTERNAL_SOIL_ENERGY kernel.
+    `--xla_disable_hlo_passes=algsimp` restores bit-identity and is now
+    enforced by tests/conftest.py (set BEFORE jax import). None of
+    --xla_allow_excess_precision=false / fast_math / optimization_level=0 /
+    disable fusion helped — it is algsimp specifically.
+  - jnp.arccos: 1 ULP off glibc on ~3% of args (matches census) → DAYL ≤4.
+  - Raw-ULP comparison is meaningless for denormal-adjacent outputs
+    (mortality factors ~1e-290): use the mixed |Δ|/max(|ref|, col-RMS)
+    criterion; kept exact-class where census says bit-identical.
+  - jnp.fmax/jnp.fmin (NOT maximum/minimum) reproduce C fmax/fmin NaN
+    semantics.
+- pytest: 20 passed, 1 skipped (GPU smoke skips under JAX_PLATFORMS=cpu).
+
 ## 2026-08-23 — Session 1 (P1, same session as P0)
 
 - Oracle harness `C/projects/JAX_VALIDATION/oracle_1100.c` built (gcc 8.5.0,

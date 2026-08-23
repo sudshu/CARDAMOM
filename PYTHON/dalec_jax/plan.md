@@ -28,17 +28,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
       to glibc; exp ≤2 ULP; erfc ≤34 ULP (4.1e-15 rel) — only real divergence.
       L1 targets tightened: most modules now target bit-exact.
 
-## P2 — leaf modules (gate: L1 green at census tolerances)
-Port order (dependency-sorted, LIU last):
-- [ ] modules/hydrofun.py — EWT2MOI, MOI2EWT, MOI2CON, MOI2PSI, PSI2MOI
-- [ ] modules/soil_energy.py — INTERNAL_ENERGY_PER_LIQUID_H2O_UNIT_MASS, INITIALIZE_INTERNAL_SOIL_ENERGY
-- [ ] modules/soil_temp_liquid_frac.py — SOIL_TEMP_AND_LIQUID_FRAC
-- [ ] modules/drainage.py — DRAINAGE
-- [ ] modules/het_resp_rates_jcr.py — HET_RESP_RATES_JCR
-- [ ] modules/lai_knorr_funcs.py — MinQuadraticSmooth, MaxExponentialSmooth, ComputeDaylightHours
-- [ ] modules/knorr_allocation.py — KNORR_ALLOCATION (erfc — watch census)
-- [ ] modules/alloc_and_auto_resp.py — ALLOC_AND_AUTO_RESP_FLUXES
-- [ ] modules/liu_an_et.py — LIU_AN_ET_REFACTOR (largest, 264 lines C)
+## P2 — leaf modules (gate: L1 green at census tolerances) — DONE 2026-08-23
+- [x] All 16 oracle modules ported and green (20 passed):
+      11 BIT-IDENTICAL (hydrofun×5, drainage, soil_temp, soil_energy×2,
+      min_quad_smooth, het_resp_rates_jcr), daylength ≤4 ULP (arccos row),
+      mixed-criterion: max_exp_smooth 5e-14, alloc 1e-13, knorr 1e-13,
+      liu 1e-12 (measured 2.6e-13 worst, exp→(co2−ci) conditioning).
+- [x] MANDATORY FLAG DISCOVERED: --xla_disable_hlo_passes=algsimp
+      (XLA rewrites x/c→x·(1/c), (x/c1)·c2→x·(c2/c1)); enforced in
+      tests/conftest.py before jax import. See TOLERANCES.md "Fusion findings".
 
 ## P3 — step body + trajectory (gate: L3 ≤ 1e-13; L4 ≤ 1e-10 on 104 fixtures incl. exact break indices)
 - [ ] types.py PyTrees (carry, params, forcing, config)

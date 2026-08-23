@@ -43,11 +43,40 @@ computed in numpy is bit-identical to the C prederive.
 | L7 | 4000-sample posterior sweep | gates exact; worst L4 criterion; P rel ≤ 1e-12 |
 | L8 | paper-analysis outputs | rel ≤ 1e-10 |
 
+## Fusion findings (2026-08-23, L1 bring-up)
+
+The census measured UNFUSED single-op dispatch. Under jit, two additional
+divergence sources appeared and were root-caused:
+
+1. **XLA algebraic simplifier rewrites arithmetic** — confirmed in optimized
+   HLO: `x / const` → `x * (1/const)` and `(x/c1) * c2` → `x * (c2/c1)`
+   (INITIALIZE_INTERNAL_SOIL_ENERGY kernel showed both, 1–2 ULP each).
+   RESOLUTION: `--xla_disable_hlo_passes=algsimp` is MANDATORY for all
+   equivalence runs (enforced by tests/conftest.py before jax import).
+   With it, all pure-arithmetic/pow/log/sqrt/trig modules are bit-identical
+   to the C oracle over the full Tier-A fixture sets.
+2. **jnp.arccos is 1 ULP off glibc on ~3% of arguments** (census row);
+   scaled by 24/pi in ComputeDaylightHours → ≤4 ULP final. Class "acos" = 4.
+
+Measured worst-case mixed error (|Δ| / max(|ref|, column RMS)) for the
+exp/erfc chains at 4.1k Tier-A cases, with algsimp disabled:
+
+| module | worst output | measured | bound set |
+| --- | --- | ---: | ---: |
+| MAX_EXPONENTIAL_SMOOTH | maxx | ~1e-15 | 5e-14 |
+| ALLOC_AND_AUTO_RESP_FLUXES | ALLOC_FOL_ACTUAL | 1.0e-14 | 1e-13 |
+| KNORR_ALLOCATION | f_T (erfc tail) | 1.7e-14 | 1e-13 |
+| LIU_AN_ET | transp | 2.6e-13 | 1e-12 |
+
+LIU's amplification is the ≤2-ULP exp error propagated through the
+(co2−ci) conditioning into gs/transp — arithmetic is bit-exact, the seed is
+exp alone. Huge raw-ULP counts on outputs approaching 0 (denormal
+LEAF/NONLEAF mortality factors, |Δ| ≤ 1e-290) are absorbed by the RMS floor
+and are physically meaningless.
+
 Notes.
-- Census measured element-wise jnp dispatch on CPU. Fusion inside jit/scan
-  could in principle select different XLA codepaths; the L3 checkpoint tests
-  are the in-situ guard. Equivalence tests are CPU-only by policy (GPU runs
-  are for performance, not reference comparison).
+- Equivalence tests are CPU-only by policy (GPU runs are for performance,
+  not reference comparison); conftest sets JAX_PLATFORMS=cpu.
 - erfc error budget over a trajectory: ≤4.1e-15 rel per step into the
   phenology memory state; linear accumulation over 240 steps ≈ 1e-12,
   two orders inside the 1e-10 L4 bar. The fdlibm-erfc escape hatch stays
