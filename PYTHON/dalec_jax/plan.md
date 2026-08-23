@@ -53,10 +53,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
       design shelved as future debugging tool
 - [ ] types.py PyTrees — deferred to P5 (only needed for likelihood config)
 
-## P4 — EDCs (gate: L2+L5 booleans exact on 4000 posterior + 10k prior)
-- [ ] edcs/prerun.py — 7 parameter-only EDCs
-- [ ] edcs/postrun.py — state_ranges, state_trajectories (C int-division stride), nsc_ratio, cfcr_ratio, fffr_ratio, mean_ly{1,2,3}_temp
-- [ ] edcs/dispatcher.py — gate arithmetic incl. short-circuit staleness reproduction
+## P4 — EDCs — DONE 2026-08-23
+- [x] edcs/__init__.py: all 15 EDCs + record_phase (short-circuit recording),
+      edcs/sio.py flux↔pool incidence (transcribed FIOMATRIX)
+- [x] L2+L5 GREEN: 120 golden fixtures (values + exact zero-pattern) AND all
+      4000 posterior samples — 60,000 EDC slots, zero mismatches (booleans,
+      sentinels, gate masks exact; finite values ≤1e-10)
+- [x] Quirks reproduced: state_ranges skips final pool row; D_LF_LY2
+      unbounded; per-term-division means; C int-division dint stride
 
 ## P5 — likelihood + posterior E2E (gate: L6+L7 green)
 - [ ] likelihood/data_prep.py — TIMESERIES_OBS_STRUCT_PREPROCESS parity (numpy, load time)
