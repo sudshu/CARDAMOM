@@ -91,7 +91,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
       identity proof (CLAUDE.md rule — guards may never change selected
       values), which is follow-on work, not equivalence work.
 
-## P7 — analyses + docs + PR (gate: L8 equality; PR opened)
-- [ ] io/to_xarray.py common schema; analysis layer in research repo
-- [ ] Residence times, allocation fractions, CI envelopes, CH4 + aerobic:anaerobic split, NBE seasonal cycle, FluxVal skill stats — run from BOTH engines, assert ≤1e-10
-- [ ] Figure pack; README; BUG_COMPAT.md final; upstream PR draft
+## P7 — analyses + docs + PR draft — DONE 2026-08-23 (L8 green)
+- [x] io/ xarray schema; analysis layer in research repo
+      (analysis/paper_analyses.py + run_c_vs_jax.py)
+- [x] L8 GREEN: 59/59 derived quantities (residence times, allocation
+      fractions + CUE, GPP/NBE/CH4/LAI CI envelopes, aerobic:anaerobic Rh
+      partition + CH4 fraction, NBE seasonal cycle, FluxVal skill stats,
+      parameter posteriors) agree <=1e-10 between engines on the 3303-sample
+      pointwise-clean posterior subset (91.3% of finite; chaos tail is the
+      L7-certified remainder)
+- [x] Figure pack figures/jax_equivalence/ + RESULTS_c_vs_jax.md
+- [x] README final; PR_DRAFT.md written — UPSTREAM PR NOT OPENED (needs
+      owner approval; outward-facing action)
