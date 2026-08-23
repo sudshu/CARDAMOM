@@ -1,0 +1,212 @@
+# Tier-A fixture domains per oracle module input.
+#
+# Ranges are DELIBERATELY wider than realistic model states: Tier A tests the
+# function over its mathematical domain (including the clamp/branch edges);
+# Tier B (tap captures of real call sites, P3) supplies realistic correlated
+# states. loguniform: true samples log-uniformly (positive lo required).
+#
+# edge_cases are exact input rows appended after the LHS block - branch
+# boundaries, exact-equality sites, and division-by-zero guards from the C.
+# constraints are enforced by row-fixups in gen_fixtures.py (see FIXUPS).
+
+HYDROFUN_EWT2MOI:
+  ranges:
+    ewt: [0.0, 1500.0]
+    p: [0.2, 0.9]
+    z: [0.01, 10.0]
+  edge_cases:
+    - [0.0, 0.5, 1.0]
+
+HYDROFUN_MOI2EWT:
+  ranges:
+    moi: [0.0, 1.5]
+    p: [0.2, 0.9]
+    z: [0.01, 10.0]
+  edge_cases:
+    - [0.0, 0.5, 1.0]
+    - [1.0, 0.5, 1.0]
+
+HYDROFUN_MOI2CON:
+  ranges:
+    moi: {lo: 1.0e-4, hi: 1.5, loguniform: true}
+    k0: {lo: 1.0e-9, hi: 1.0e-2, loguniform: true}
+    b: [1.0, 20.0]
+  edge_cases:
+    - [1.0, 1.0e-5, 5.0]
+    - [0.0, 1.0e-5, 5.0]     # moi=0 -> pow(0, 2b+3) = 0
+
+HYDROFUN_MOI2PSI:
+  ranges:
+    moi: {lo: 1.0e-4, hi: 1.5, loguniform: true}
+    psi_porosity: [-0.05, -1.0e-4]
+    b: [1.0, 20.0]
+  edge_cases:
+    - [1.0, -0.001, 5.0]     # psi == psi_porosity exactly
+    - [0.0, -0.001, 5.0]     # C: pow(inf, b) = inf; psi = -inf
+
+HYDROFUN_PSI2MOI:
+  ranges:
+    psi: [-30.0, -1.0e-4]
+    psi_porosity: [-0.05, -1.0e-4]
+    b: [1.0, 20.0]
+  edge_cases:
+    - [-0.001, -0.001, 5.0]  # psi == psi_porosity -> moi = 1
+
+DRAINAGE:
+  # constraint (FIXUPS): psi_field <= psi_porosity (both negative MPa)
+  ranges:
+    sm: [0.0, 1.5]
+    Qexcess: [0.0, 1.0]
+    psi_field: [-0.5, -1.0e-3]
+    psi_porosity: [-0.05, -1.0e-4]
+    b: [1.0, 20.0]
+  edge_cases:
+    - [1.0, 0.5, -0.01, -0.001, 5.0]    # sm == 1 exactly (excess branch edge)
+    - [1.2, 0.5, -0.01, -0.001, 5.0]    # sm > 1 (excess drainage)
+    - [0.0, 0.5, -0.01, -0.001, 5.0]    # dry soil, psi -> -inf via pow(inf,b)
+
+INTERNAL_ENERGY_PER_LIQUID_H2O_UNIT_MASS:
+  ranges:
+    TEMP: [180.0, 340.0]
+  edge_cases:
+    - [56.79]                 # zero-energy temperature -> U = 0
+
+INITIALIZE_INTERNAL_SOIL_ENERGY:
+  ranges:
+    internal_energy_per_mm_H2O: [1.0e5, 1.3e6]
+    H2O_mm: [0.0, 1500.0]
+    dry_soil_vol_heat_capacity: [0.0, 3.0e6]
+    depth: [0.0, 10.0]
+  edge_cases:
+    - [571691.6069999999, 100.0, 1.3e6, 1.0]   # ~exactly UI3 for 1mm water
+    - [905691.607, 100.0, 1.3e6, 1.0]          # ~exactly UL3 boundary
+
+MIN_QUADRATIC_SMOOTH:
+  ranges:
+    x: [0.0, 25.0]
+    y: [0.0, 25.0]
+    eta: [0.8, 0.999]
+  edge_cases:
+    - [0.0, 0.0, 0.99]        # z clamp fmax(z, 1e-18) active
+    - [5.0, 5.0, 0.99]
+
+MAX_EXPONENTIAL_SMOOTH:
+  ranges:
+    x: [-1.0, 35.0]
+    y: [0.0, 0.02]
+    x0: [1.0e-3, 0.05]
+  edge_cases:
+    - [0.001, 0.001, 0.001]   # x == y - x0 branch boundary region
+    - [0.0, 1.0e-3, 2.0e-2]   # the transp call-site constants
+    - [0.0, 1.0e-9, 5.0e-3]   # the lambda_lim call-site constants
+
+COMPUTE_DAYLIGHT_HOURS:
+  ranges:
+    latitude: [-90.0, 90.0]
+    DOY: [1.0, 366.0]
+  edge_cases:
+    - [66.6, 172.0]           # polar-day boundary region (mult ~ 1)
+    - [-66.6, 172.0]          # polar-night boundary region (mult ~ -1)
+    - [90.0, 172.0]           # tan(90deg*pi7/180) - not a true pole with 7-digit pi
+    - [0.0, 80.0]
+
+SOIL_TEMP_AND_LIQUID_FRAC:
+  ranges:
+    dry_soil_vol_heat_capacity: [0.0, 3.0e6]
+    depth: [0.0, 10.0]
+    soil_water: [1.0e-2, 1500.0]
+    internal_energy: [1.0e4, 2.0e9]
+  edge_cases:
+    - [0.0, 0.0, 1.0, 571691.6069999999]  # INITIALIZE's internal 1mm/no-soil call shape
+    - [1.3e6, 1.0, 100.0, 4.0e8]          # frozen branch
+    - [1.3e6, 1.0, 100.0, 1.5e9]          # unfrozen branch
+
+HET_RESP_RATES_JCR:
+  ranges:
+    TEMP: [230.0, 330.0]
+    SM: [0.0, 1.3]
+    LF: [0.0, 1.0]
+    S_FV: {lo: 0.01, hi: 10.0, loguniform: true}
+    SM_OPT: [0.01, 1.0]
+    FWC: [0.01, 1.0]
+    R_CH4: {lo: 1.0e-4, hi: 1.0, loguniform: true}
+    Q10CH4: [1.0, 6.0]
+    Q10CO2: [1.0, 6.0]
+  edge_cases:
+    - [298.15, 1.0, 1.0, 1.0, 0.5, 0.3, 0.01, 2.0, 2.0]  # SM=1: fV=0 -> theta_ae 0/0 NaN -> fW=0
+    - [298.15, 0.0, 1.0, 1.0, 0.5, 0.3, 0.01, 2.0, 2.0]  # dry soil
+    - [298.15, 0.5, 0.0, 1.0, 0.5, 0.3, 0.01, 2.0, 2.0]  # frozen (LF=0) -> fT=0
+
+KNORR_ALLOCATION:
+  ranges:
+    temp: [230.0, 330.0]
+    deltat: [1.0, 31.0]
+    n: [0.0, 240.0]
+    latitude: [-90.0, 90.0]
+    DOY: [1.0, 366.0]
+    lambda: [0.0, 15.0]
+    lambda_max: [0.1, 15.0]
+    T_phi: [255.0, 305.0]
+    T_r: [0.5, 15.0]
+    plgr: {lo: 1.0e-3, hi: 1.0, loguniform: true}
+    k_L: {lo: 1.0e-4, hi: 1.0, loguniform: true}
+    pasm: [0.0, 800.0]
+    transp: [0.0, 25.0]
+    tau_W: [1.0, 300.0]
+    t_c: [0.0, 24.0]
+    t_r: [0.1, 12.0]
+    T_memory: [230.0, 330.0]
+    lambda_max_memory: [0.1, 15.0]
+  edge_cases:
+    - [280.0, 30.0, 0.0, -0.06, 15.0, 1.0, 5.0, 280.0, 5.0, 0.1, 0.01, 100.0, 0.0, 50.0, 12.0, 3.0, 280.0, 5.0]  # transp=0: MaxExponentialSmooth floor path
+
+ALLOC_AND_AUTO_RESP_FLUXES:
+  ranges:
+    deltat: [1.0, 31.0]
+    TEMP: [230.0, 330.0]
+    C_LIVE_W: [0.0, 60000.0]
+    C_LIVE_R: [0.0, 8000.0]
+    NSC: [0.0, 8000.0]
+    GPP: [0.0, 30.0]
+    Rd: [0.0, 10.0]
+    mr_r: {lo: 1.0e-7, hi: 0.1, loguniform: true}
+    mr_w: {lo: 1.0e-8, hi: 0.01, loguniform: true}
+    gr: [0.2, 0.95]
+    Q10mr: [1.0, 4.0]
+    ALLOC_FOL_POT: [0.0, 20.0]
+    ALLOC_WOO_POT: [0.0, 20.0]
+    ALLOC_ROO_POT: [0.0, 20.0]
+  edge_cases:
+    - [30.0, 290.0, 0.0, 0.0, 100.0, 5.0, 1.0, 0.01, 0.001, 0.5, 2.0, 1.0, 1.0, 1.0]  # POTENTIAL_MR == 0 branch
+    - [30.0, 290.0, 1000.0, 100.0, 100.0, 5.0, 1.0, 0.01, 0.001, 0.5, 2.0, 0.0, 0.0, 0.0]  # F_LABREL_DEMAND == 0 branch (GF stays 0)
+    - [30.0, 290.0, 1000.0, 100.0, 100.0, 0.0, 0.0, 0.01, 0.001, 0.5, 2.0, 1.0, 1.0, 1.0]  # GPP == 0 -> CUE = NPP/0
+
+LIU_AN_ET:
+  ranges:
+    SRAD: [0.0, 40.0]
+    VPD: {lo: 1.0e-3, hi: 6.5, loguniform: true}
+    TEMP: [230.0, 330.0]
+    vcmax25: [1.0, 250.0]
+    co2: [200.0, 1000.0]
+    beta_factor: [0.0, 1.0]
+    g1: [0.5, 14.0]
+    LAI: [0.0, 15.0]
+    ga: {lo: 1.0e-3, hi: 2.0, loguniform: true}
+    VegK: [0.2, 1.5]
+    Tupp: [280.0, 330.0]
+    Tdown: [230.0, 290.0]
+    C3_frac: [0.0, 1.0]
+    clumping: [0.3, 1.0]
+    leaf_refl_par: [0.01, 0.3]
+    leaf_refl_nir: [0.1, 0.6]
+    maxPevap: [0.1, 50.0]
+    precip: [0.0, 100.0]
+    q10canopy: [1.0, 4.0]
+    q10canopyRd: [1.0, 4.0]
+    canopyRdsf: {lo: 1.0e-3, hi: 0.1, loguniform: true}
+    NSC: [0.0, 8000.0]
+    deltat: [1.0, 31.0]
+  edge_cases:
+    - [0.0, 1.0, 290.0, 50.0, 400.0, 0.5, 4.0, 3.0, 0.1, 0.5, 309.0, 280.0, 1.0, 0.8, 0.054, 0.36, 5.0, 2.0, 2.0, 2.0, 0.01, 100.0, 30.0]  # SRAD=0 -> transp branch false, Rd_daily_potential=0 branch
+    - [20.0, 1.0, 290.0, 50.0, 400.0, 0.0, 4.0, 3.0, 0.1, 0.5, 309.0, 280.0, 1.0, 0.8, 0.054, 0.36, 5.0, 2.0, 2.0, 2.0, 0.01, 100.0, 30.0]  # beta=0 -> An<=0 -> gs=0 -> 1/gs=inf -> transp=petVnum/inf=0
+    - [20.0, 1.0, 290.0, 50.0, 400.0, 0.5, 4.0, 0.0, 0.1, 0.5, 309.0, 280.0, 1.0, 0.8, 0.054, 0.36, 5.0, 2.0, 2.0, 2.0, 0.01, 0.0, 30.0]   # LAI=0 and NSC=0

@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+test = ["pytest>=8", "pyyaml"]
 cuda = ["jax[cuda12]==0.11.1"]
 
 [tool.hatch.build.targets.wheel]

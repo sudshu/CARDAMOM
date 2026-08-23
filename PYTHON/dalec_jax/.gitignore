@@ -1,0 +1,6 @@
+tests/_golden/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+build/
+dist/

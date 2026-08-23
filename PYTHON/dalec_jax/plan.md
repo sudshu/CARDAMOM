@@ -12,16 +12,21 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
 - [x] Papers downloaded (4/5; Bloom 2016 PNAS bot-walled — see research repo papers/README.md)
 
 ## P1 — oracle + codegen + census (gate: goldens bit-identical ×2; counts 89/100/30/15; TOLERANCES.md)
-- [ ] C/projects/JAX_VALIDATION/oracle_1100.c — `manifest` subcommand
-- [ ] `module` subcommand + adapters (LIU_AN_ET, KNORR, ALLOC, HET_RESP, SOIL_TEMP, INIT_ENERGY, ENERGY_PER_MASS, DRAINAGE, HYDROFUN×5, LAI_KNORR funcs)
-- [ ] `trajectory` subcommand (direct DALEC_1100 call; POOLS/FLUXES raw dumps)
-- [ ] `mlf` subcommand (M_EDCs[15], M_LIKELIHOODS[31], P)
-- [ ] ORACLE_TAP macro lines in DALEC_1100.c (no-op default) + `tap` build
-- [ ] Makefile (pinned production flags) + `make golden` determinism check
-- [ ] tools/gen_indices.py (vendor scripts/dalec_model_info.py) → indices.py
-- [ ] tools/gen_fixtures.py + module_ranges.yaml (LHS 4096/module + ~50 edge cases)
-- [ ] Trajectory fixture set: 64 posterior + 8 viable + 32 prior draws
-- [ ] ULP census (glibc vs jnp: exp, log, pow, erfc, sqrt) → tests/TOLERANCES.md
+- [x] C/projects/JAX_VALIDATION/oracle_1100.c — `manifest` subcommand
+- [x] `module` subcommand + adapters (16 modules registered)
+- [x] `trajectory` subcommand — VALIDATED bit-identical vs RUN_MODEL on all
+      3614/4000 genuinely-run posterior samples
+- [x] `mlf` subcommand — P bit-identical vs RUN_MODEL PROB on all 3614
+- [~] ORACLE_TAP macro lines in DALEC_1100.c — DEFERRED to P3 (checkpoint tests)
+- [x] Makefile (pinned production flags gcc -O0) + fingerprint target
+- [x] tools/gen_indices.py → indices.py (89/100/30/15 exact; --check mode)
+- [x] tools/gen_fixtures.py + module_ranges.yaml (LHS 4096 + edges; 16 modules;
+      determinism gate byte-identical)
+- [x] Trajectory fixtures: 120 rows = 64 genuine + 16 gated + 8 viable +
+      32 prior (53 exercise the isfinite-break path)
+- [x] ULP census → tests/TOLERANCES.md. Headline: log/sqrt/pow/trig BIT-IDENTICAL
+      to glibc; exp ≤2 ULP; erfc ≤34 ULP (4.1e-15 rel) — only real divergence.
+      L1 targets tightened: most modules now target bit-exact.
 
 ## P2 — leaf modules (gate: L1 green at census tolerances)
 Port order (dependency-sorted, LIU last):
