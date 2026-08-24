@@ -1,0 +1,12 @@
+device: [cuda(id=0)]
+  default   B=   1     546.57 ms total   546.5739 ms/member   (compile 6.7 s, min of 6)
+  default   B=   8     560.76 ms total    70.0949 ms/member   (compile 6.0 s, min of 6)
+  default   B=  32     590.62 ms total    18.4568 ms/member   (compile 6.2 s, min of 6)
+  default   B= 128     593.93 ms total     4.6401 ms/member   (compile 6.2 s, min of 6)
+  default   B= 512     636.29 ms total     1.2427 ms/member   (compile 6.3 s, min of 5)
+  nn_whole  B=   1     522.03 ms total   522.0310 ms/member   (compile 7.0 s, min of 6)
+  nn_whole  B=   8     521.14 ms total    65.1425 ms/member   (compile 5.8 s, min of 6)
+  nn_whole  B=  32     548.44 ms total    17.1387 ms/member   (compile 6.1 s, min of 6)
+  nn_whole  B= 128     558.98 ms total     4.3671 ms/member   (compile 6.0 s, min of 6)
+  nn_whole  B= 512     602.15 ms total     1.1761 ms/member   (compile 6.1 s, min of 5)
+wrote batched results

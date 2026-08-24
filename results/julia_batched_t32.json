@@ -1,0 +1,19 @@
+{
+  "T": 3287,
+  "batch": 512,
+  "configs": {
+    "default": {
+      "nchunks": 32,
+      "nparams": 42,
+      "per_member_ms": 0.13430204101562498,
+      "total_ms": 68.76264499999999
+    },
+    "nn_whole": {
+      "nchunks": 32,
+      "nparams": 240,
+      "per_member_ms": 0.132152724609375,
+      "total_ms": 67.662195
+    }
+  },
+  "nthreads": 32
+}

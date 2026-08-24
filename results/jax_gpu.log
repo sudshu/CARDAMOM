@@ -1,0 +1,20 @@
+jax 0.4.23 devices: [cuda(id=0)]  T = 3287
+--- default (42 params) ---
+  forward only             149.304 ms   (min of 14)
+  loss (fwd + reductions)  148.390 ms   (min of 14)
+  value+grad (jax.grad)   1176.433 ms   (min of 5)   overhead vs loss 7.93x
+  Adam iter, as-shipped   1192.661 ms   -> 25k calib 29816.5 s
+  Adam iter, async        1192.859 ms   -> 25k calib 29821.5 s
+  JIT compile: fwd 1.07 s  loss 1.53 s  grad 6.01 s
+  loss after 300 iters: -3.239140 (started -3.239093)
+
+--- nn_whole (240 params) ---
+  forward only             118.873 ms   (min of 17)
+  loss (fwd + reductions)  118.624 ms   (min of 17)
+  value+grad (jax.grad)   1155.778 ms   (min of 5)   overhead vs loss 9.74x
+  Adam iter, as-shipped   1141.490 ms   -> 25k calib 28537.3 s
+  Adam iter, async        1141.381 ms   -> 25k calib 28534.5 s
+  JIT compile: fwd 0.97 s  loss 1.56 s  grad 6.00 s
+  loss after 300 iters: -3.456151 (started -3.456943)
+
+wrote /home/spandey/rough/cardamom_research/differland_jl/results/jax_gpu.json

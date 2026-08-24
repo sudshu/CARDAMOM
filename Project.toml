@@ -1,0 +1,14 @@
+name = "DifferLand"
+uuid = "b3a1f7c2-5d84-4e91-9c26-0f7a1d3e8b45"
+version = "0.1.0"
+
+[deps]
+Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[compat]
+julia = "1.10"
