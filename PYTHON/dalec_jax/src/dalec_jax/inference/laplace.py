@@ -1,0 +1,140 @@
+"""Multipoint Laplace: L-BFGS modes + exact Hessians + prior-width repair.
+
+Measured at the demo site (adversarially audited, C-oracle re-scored):
+- 15 of 16 modes from two independent runs sit AT OR ABOVE the best sample
+  the production MCMC ever stored; no chain sample within 2.8 log-units of
+  the best mode. The MAP-minus-chain-best gap is a cheap per-site
+  convergence audit.
+- The raw Gaussian overstated posterior spreads ~2.2x (median) because
+  near-flat Hessian directions were PSD-floored; capping those directions
+  at the PRIOR's width (logistic variance pi^2/3 in z) repairs it to a
+  median spread ratio of 0.92 vs the MCMC (|dmean| 0.035 in u-space).
+- 32 starts suffice: 256 starts gained +0.36 log-units and the same basin.
+- Do NOT importance-reweight the mixture in 89-D: measured collapse
+  (2.3% of draws EDC-feasible, weight ESS = 1 of 65,536).
+
+Implementation notes: the L-BFGS scan is CHUNKED — compiling a monolithic
+400-iteration optax lbfgs+zoom scan took ~45 minutes of XLA time; chunks
+of ~20 compile in seconds. Requires the optional dependency ``optax``.
+"""
+from __future__ import annotations
+
+import numpy as np
+
+import jax
+import jax.numpy as jnp
+
+_PRIOR_VAR = float(np.pi ** 2 / 3.0)   # logistic prior variance in z
+
+
+def multipoint_laplace(logpost, z0, max_iters: int = 400, chunk: int = 20,
+                       verbose: bool = True):
+    """Vmapped L-BFGS ascent on logpost from starts z0 (n, 89).
+
+    Returns dict with z_end (n,89), P_end (n; z-space density — includes
+    the logit Jacobian, see target.py caution), gnorm_end (n).
+    """
+    try:
+        import optax
+    except ImportError as e:                       # pragma: no cover
+        raise ImportError(
+            "multipoint_laplace requires optax: pip install "
+            "'dalec-jax[inference]'") from e
+
+    neg = lambda z: -logpost(z)
+    opt = optax.lbfgs()
+    vg = jax.value_and_grad(neg)
+
+    def step(carry, _):
+        z, st = carry
+        v, g = vg(z)
+        upd, st = opt.update(g, st, z, value=v, grad=g, value_fn=neg)
+        z = optax.apply_updates(z, upd)
+        return (z, st), (v, jnp.max(jnp.abs(g)))
+
+    @jax.jit
+    @jax.vmap
+    def run_chunk(z, st):
+        (z, st), (vals, gn) = jax.lax.scan(step, (z, st), None, length=chunk)
+        return z, st, vals, gn
+
+    z = jnp.asarray(z0)
+    st = jax.vmap(opt.init)(z)
+    v_last = g_last = None
+    for c in range(max(max_iters // chunk, 1)):
+        z, st, vals, gn = run_chunk(z, st)
+        v_last, g_last = np.asarray(vals[:, -1]), np.asarray(gn[:, -1])
+        if verbose:
+            # nan-robust: a chain whose zoom line search fails can end NaN;
+            # dedupe_modes filters those out downstream.
+            with np.errstate(all="ignore"):
+                best = -np.nanmin(v_last)
+                gmed = np.nanmedian(g_last)
+            print(f"  [lbfgs] iter {(c+1)*chunk:4d}: best P {best:.2f} "
+                  f"({np.isfinite(v_last).sum()}/{len(v_last)} finite), "
+                  f"median |grad| {gmed:.2e}", flush=True)
+    return {"z_end": np.asarray(z), "P_end": -v_last, "gnorm_end": g_last}
+
+
+def dedupe_modes(z_end, P_end, tol: float = 0.15, max_modes: int = 8):
+    """Keep the highest-P representative of each distinct mode (sup-norm)."""
+    order = np.argsort(-np.asarray(P_end))
+    keep = []
+    for i in order:
+        if not np.isfinite(P_end[i]):
+            continue
+        if all(np.max(np.abs(z_end[i] - z_end[j])) > tol for j in keep):
+            keep.append(int(i))
+        if len(keep) >= max_modes:
+            break
+    return keep
+
+
+def exact_hessians(logpost, z_modes, verbose: bool = True):
+    """Exact 89x89 Hessians of -logpost at each mode (forward-over-reverse).
+
+    ~30 s per mode on CPU or one A100 at batch 1 (the sequential 240-step
+    scan dominates); vmap/chunk across modes if you have many.
+    """
+    hess = jax.jit(jax.jacfwd(jax.grad(lambda z: -logpost(z))))
+    out = []
+    for i, zm in enumerate(np.asarray(z_modes)):
+        out.append(np.asarray(hess(jnp.asarray(zm))))
+        if verbose:
+            print(f"  [hessian] {i+1}/{len(z_modes)}", flush=True)
+    return np.array(out)
+
+
+def cap_covariance(H, cap: float = _PRIOR_VAR):
+    """Hessian -> covariance with likelihood-flat directions capped at the
+    prior's width (the one-line repair; NOT an arbitrary PSD floor).
+
+    Eigen-directions with curvature below 1/cap (including any negative
+    curvature at a non-converged iterate) get variance = cap, i.e. the
+    prior's own variance in z: "if the data don't curve the surface, your
+    uncertainty is the prior's width."
+    """
+    Hs = 0.5 * (H + H.T)
+    w, V = np.linalg.eigh(Hs)
+    var = np.where(w > 1.0 / cap, 1.0 / np.maximum(w, 1e-300), cap)
+    return (V * var) @ V.T
+
+
+def evidence_weights(P_modes, covs):
+    """Laplace evidence weights over modes (softmax of P + 0.5*logdet)."""
+    logw = np.array([P + 0.5 * np.linalg.slogdet(C)[1]
+                     for P, C in zip(P_modes, covs)])
+    w = np.exp(logw - logw.max())
+    return w / w.sum()
+
+
+def mixture_draws(rng, z_modes, covs, weights, n: int):
+    """Draw n samples from the Gaussian mixture (screening use only —
+    remember it is a symmetric bell on a skewed posterior; ~±35% per-param
+    width accuracy after capping, at the demo site)."""
+    counts = rng.multinomial(n, np.asarray(weights, dtype=float))
+    draws = [rng.multivariate_normal(np.asarray(z_modes[k]), covs[k], size=c)
+             for k, c in enumerate(counts) if c]
+    z = np.concatenate(draws)
+    rng.shuffle(z)
+    return z

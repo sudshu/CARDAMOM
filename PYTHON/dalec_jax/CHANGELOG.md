@@ -3,6 +3,35 @@
 Newest first. Every agentic session appends: what was attempted, what passed,
 what FAILED (so it is not blindly retried), environment changes.
 
+## 2026-08-24 — Inference fast path + self-containment + README overhaul
+
+- NEW `src/dalec_jax/inference/`: `target.py` (z-space log-posterior,
+  C-identical target, with the Jacobian-datum caution), `screening.py`
+  (batched prior rejection; measured pass rate ~6e-7 at the demo site,
+  audit-replicated and C-oracle-confirmed), `laplace.py` (chunked vmapped
+  L-BFGS — monolithic 400-iter scan costs ~45 min of XLA compile, chunks
+  of 20 compile in seconds; exact Hessians; `cap_covariance` = the
+  prior-width repair of flat directions, spread ratio 2.22->0.92 median;
+  evidence weights; explicit warning against 89-D importance reweighting,
+  measured ESS 1/65,536), `rwm.py` (vmapped Metropolis with arbitrary
+  proposal covariance; capped-Laplace shape measured best of four, 2.4-3x
+  diagonal, with the multi-chain-ESS-is-diversity caution from the
+  same-start control audit). Optional dep: `pip install ".[inference]"`.
+- NEW `examples/laplace_fast_path.py`: end-to-end demo (starts -> modes ->
+  Hessians -> capped mixture) on bundled data; `--screen` for blind
+  rejection starts.
+- Self-containment: `tests/data/{example_1100.cbf.nc, assim_1100.cbr,
+  viable_ensemble.cbr.nc}` committed (~3 MB); `tools/gen_fixtures.py` now
+  reads them from `tests/data/` instead of a sibling research checkout —
+  `make golden` + pytest + examples run from a bare clone + C toolchain.
+- README overhauled: equivalence table kept; added audited performance
+  tables, the inference fast path with its measured worth and known dead
+  ends, environment gotchas (incl. the LD_LIBRARY_PATH CUDA shadowing
+  fix and the CARDAMOM_RUN_MODEL stale-output warning), docs map.
+- All sampler/Laplace numbers cited in code/docs went through two
+  independent adversarial audits (reports in the research archive);
+  corrected statements are the ones quoted here.
+
 ## 2026-08-23 — Session 1 (P5+P6, same session)
 
 - P5: likelihood layer ported + L6/L7 green (30 passed). Three new

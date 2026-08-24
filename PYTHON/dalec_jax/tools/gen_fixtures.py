@@ -145,14 +145,13 @@ def gen_trajectory_fixtures(rng: np.random.Generator) -> dict:
     import netCDF4
     from dalec_jax import indices as I
 
-    root = PKG / "../../.."
-    cbf = (root / "runs/mdf_1100_full/example_1100.cbf.nc").resolve()
+    cbf = (PKG / "tests/data/example_1100.cbf.nc").resolve()
     tdir = GOLDEN / "trajectories"
     tdir.mkdir(parents=True, exist_ok=True)
 
-    with netCDF4.Dataset(root / "runs/mdf_1100_full/assim_1100.cbr") as ds:
+    with netCDF4.Dataset(PKG / "tests/data/assim_1100.cbr") as ds:
         post = np.array(ds["Parameters"][:])
-    with netCDF4.Dataset(root / "runs/baseline_1100/viable_ensemble.cbr.nc") as ds:
+    with netCDF4.Dataset(PKG / "tests/data/viable_ensemble.cbr.nc") as ds:
         viable = np.array(ds["Parameters"][:])
 
     # classify posterior samples with a cheap mlf pass
@@ -265,12 +264,11 @@ def gen_posterior_golden() -> dict:
     values from the C oracle (chaos certificates for the P-level gate)."""
     import netCDF4
 
-    root = PKG / "../../.."
-    cbf = (root / "runs/mdf_1100_full/example_1100.cbf.nc").resolve()
+    cbf = (PKG / "tests/data/example_1100.cbf.nc").resolve()
     pdir = GOLDEN / "posterior"
     pdir.mkdir(parents=True, exist_ok=True)
 
-    with netCDF4.Dataset(root / "runs/mdf_1100_full/assim_1100.cbr") as ds:
+    with netCDF4.Dataset(PKG / "tests/data/assim_1100.cbr") as ds:
         post = np.array(ds["Parameters"][:])
     pf = pdir / "params.bin"
     post.astype("<f8").tofile(pf)
