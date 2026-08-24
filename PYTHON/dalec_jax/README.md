@@ -12,6 +12,10 @@ On top of the verified model sits an **inference fast path**
 feasible-start screening, and covariance-shaped Metropolis — each measured
 against the C's own MCMC and adversarially audited (see below).
 
+> **New to this work? Start with [FINDINGS.md](FINDINGS.md)** — the report
+> for the CARDAMOM group: the key questions answered up front, the two
+> developments in detail, the C-code findings, and every figure.
+
 ## Contents
 
 1. [Verified equivalence](#verified-equivalence-all-gates-green-2026-08-23)
