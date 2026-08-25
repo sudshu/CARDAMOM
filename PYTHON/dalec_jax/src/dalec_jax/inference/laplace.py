@@ -33,6 +33,15 @@ def multipoint_laplace(logpost, z0, max_iters: int = 400, chunk: int = 20,
 
     Returns dict with z_end (n,89), P_end (n; z-space density — includes
     the logit Jacobian, see target.py caution), gnorm_end (n).
+
+    z_end/P_end are the BEST FINITE iterate each chain visited, tracked
+    inside the scan — guaranteed consistent (P_end == logpost(z_end)) and
+    immune to a final line-search step that walks off a cliff or NaNs.
+    (An earlier version returned post-update z with the pre-update value:
+    off by one step, and a NaN'd last step could pair a finite P with a
+    NaN z, poisoning downstream Hessians/proposals.) gnorm_end is the
+    |grad|_inf at the last evaluated iterate — a stationarity diagnostic,
+    not necessarily at z_end.
     """
     try:
         import optax
@@ -46,34 +55,42 @@ def multipoint_laplace(logpost, z0, max_iters: int = 400, chunk: int = 20,
     vg = jax.value_and_grad(neg)
 
     def step(carry, _):
-        z, st = carry
+        z, st, zb, vb = carry
         v, g = vg(z)
+        better = jnp.isfinite(v) & (v < vb)
+        zb = jnp.where(better, z, zb)
+        vb = jnp.where(better, v, vb)
         upd, st = opt.update(g, st, z, value=v, grad=g, value_fn=neg)
         z = optax.apply_updates(z, upd)
-        return (z, st), (v, jnp.max(jnp.abs(g)))
+        return (z, st, zb, vb), (v, jnp.max(jnp.abs(g)))
 
     @jax.jit
     @jax.vmap
-    def run_chunk(z, st):
-        (z, st), (vals, gn) = jax.lax.scan(step, (z, st), None, length=chunk)
-        return z, st, vals, gn
+    def run_chunk(z, st, zb, vb):
+        (z, st, zb, vb), (vals, gn) = jax.lax.scan(
+            step, (z, st, zb, vb), None, length=chunk)
+        return z, st, zb, vb, vals, gn
 
     z = jnp.asarray(z0)
     st = jax.vmap(opt.init)(z)
-    v_last = g_last = None
+    zb, vb = z, jnp.full(z.shape[0], jnp.inf)
+    g_last = None
     for c in range(max(max_iters // chunk, 1)):
-        z, st, vals, gn = run_chunk(z, st)
-        v_last, g_last = np.asarray(vals[:, -1]), np.asarray(gn[:, -1])
+        z, st, zb, vb, vals, gn = run_chunk(z, st, zb, vb)
+        g_last = np.asarray(gn[:, -1])
         if verbose:
-            # nan-robust: a chain whose zoom line search fails can end NaN;
-            # dedupe_modes filters those out downstream.
             with np.errstate(all="ignore"):
-                best = -np.nanmin(v_last)
-                gmed = np.nanmedian(g_last)
-            print(f"  [lbfgs] iter {(c+1)*chunk:4d}: best P {best:.2f} "
-                  f"({np.isfinite(v_last).sum()}/{len(v_last)} finite), "
-                  f"median |grad| {gmed:.2e}", flush=True)
-    return {"z_end": np.asarray(z), "P_end": -v_last, "gnorm_end": g_last}
+                print(f"  [lbfgs] iter {(c+1)*chunk:4d}: best P "
+                      f"{-np.nanmin(np.asarray(vb)):.2f} "
+                      f"({int(np.isfinite(np.asarray(vb)).sum())}"
+                      f"/{len(np.asarray(vb))} finite), median |grad| "
+                      f"{np.nanmedian(g_last):.2e}", flush=True)
+    # fold in the final iterate (its value was never scanned)
+    v_fin = np.asarray(jax.jit(jax.vmap(neg))(z))
+    zb, vb = np.asarray(zb), np.asarray(vb)
+    take = np.isfinite(v_fin) & (v_fin < vb)
+    zb[take], vb[take] = np.asarray(z)[take], v_fin[take]
+    return {"z_end": zb, "P_end": -vb, "gnorm_end": g_last}
 
 
 def dedupe_modes(z_end, P_end, tol: float = 0.15, max_modes: int = 8):
