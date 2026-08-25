@@ -39,8 +39,21 @@ def run_rwm(logpost, z0, proposal_cov, n_iters: int = 20000,
     d = np.asarray(z0).shape[1]
     if scale is None:
         scale = 2.38 / np.sqrt(d)
-    L = jnp.asarray(np.linalg.cholesky(
-        np.asarray(proposal_cov) + 1e-12 * np.eye(d)) * scale)
+    cov = np.asarray(proposal_cov)
+    # A non-finite proposal covariance does NOT raise downstream: the
+    # Cholesky yields NaN, every proposal is NaN, every Metropolis ratio
+    # compares False, and the chains sit at their seeds with 0% acceptance
+    # looking like a merely hard target. Observed on FluxVal site 71, where
+    # the exact Hessian at a cliff-side mode came back non-finite. Fail
+    # loudly instead.
+    if not np.isfinite(cov).all():
+        raise ValueError(
+            "proposal_cov contains non-finite entries; the chains would "
+            "freeze silently at 0% acceptance. The usual cause is an exact "
+            "Hessian taken at a mode sitting on an EDC cliff — pick a mode "
+            "whose covariance is finite and positive definite (see "
+            "evidence_weights, which gives unusable modes weight 0).")
+    L = jnp.asarray(np.linalg.cholesky(cov + 1e-12 * np.eye(d)) * scale)
 
     def one_iter(carry, key):
         z, lp, acc = carry

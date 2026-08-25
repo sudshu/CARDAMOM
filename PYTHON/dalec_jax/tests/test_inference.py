@@ -138,6 +138,20 @@ def test_rwm_never_leaves_the_feasible_region():
     assert np.abs(out["z"]).max() <= 2.5
 
 
+def test_rwm_rejects_a_non_finite_proposal_covariance():
+    """Regression: a NaN covariance froze chains at 0% acceptance silently.
+
+    Cholesky of NaN gives NaN, every proposal is NaN, every Metropolis
+    ratio compares False, and the run looks like a merely hard target.
+    Observed on FluxVal site 71 (chain movement exactly 0.0).
+    """
+    cov = np.eye(4)
+    cov[2, 2] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        run_rwm(_banana, np.zeros((2, 4)), cov, n_iters=100, chunk=100,
+                thin=10, seed=1, verbose=False)
+
+
 def test_rwm_is_deterministic_for_a_fixed_seed():
     z0 = np.zeros((2, 4))
     kw = dict(n_iters=200, chunk=100, thin=10, scale=0.5, verbose=False)
