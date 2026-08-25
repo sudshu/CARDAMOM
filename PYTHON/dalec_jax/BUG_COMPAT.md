@@ -22,3 +22,33 @@ Related but out of scope (scientific change, needs approval): un-clamped
 explicit-Euler decomposition (D1100:922-939) with uncapped fT
 (HET_RESP_RATES_JCR.c:78) drives the EDC-7 viability bottleneck; a cap or
 sub-stepping would alter the model. The port reproduces the divergence.
+
+## Model-level defect: zero-input pools break the trajectory EDC
+
+`DALEC_EDC_TRAJECTORY.c` forms `Fin/Fout` for each checked pool. `H2O_SWE`'s
+**only** input flux is `snowfall`, taken straight from the driver. A driver
+whose snowfall is identically zero therefore gives `Fin == 0` for that pool,
+so `rs = 0` and the EDC evaluates to `-inf`/`NaN` **for every parameter
+vector**: the site is uncalibratable, and the symptom is an EDC search that
+never converges rather than any error message.
+
+Measured, in **both** engines, on the bundled demo site (512 posterior
+vectors, `oracle_1100 mlf` and JAX):
+
+| demo-site SNOWFALL | JAX feasible | C feasible |
+| --- | ---: | ---: |
+| as shipped (max 1.7e-15 mm/d) | 512/512 | 512/512 |
+| set to exactly 0.0 | **0/512** | **0/512** |
+| set to 1e-300 | 512/512 | 512/512 |
+
+Production runs escape this only because ERA5-derived snowfall carries float
+residue rather than exact zeros — the demo driver's largest snowfall value
+is 1.7e-15 mm/d, and 211 of its 240 months are exact zeros. Any genuinely
+snow-free site (Mediterranean, arid, tropical), or any driver pipeline that
+cleanly zeroes the field, is exposed. This was found the hard way: a pilot
+converter that assigned snow only below a monthly-mean freezing point
+produced two such sites and they were initially misread as physically hard.
+
+Not a transcription issue — the port reproduces the C exactly — so there is
+no `bug_compat.py` entry. Fixing it upstream (guarding `Fin == 0`, or
+excluding pools with no active input from the EDC) is a scientific change.

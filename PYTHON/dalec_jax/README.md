@@ -101,11 +101,18 @@ What each piece is worth (demo site):
   above the best sample the production MCMC ever stored (C-oracle
   re-scored); no chain sample within 2.8 log-units of the best mode. The
   MAP-minus-chain-best gap is a free per-site **convergence audit**.
-- **Feasible starts become a bounded step**: full-gate prior pass rate
-  measured at ≈6e-7, so blind batched rejection finds a start in ~1.3–1.8M
-  evaluations (~20 s on one A100) — it cannot stall, unlike an annealed
-  local search (the single-chain MCMCID-119 search never terminated at
-  this site in two attempts).
+- **Feasible starts become a bounded step — with one sharp caveat**: the
+  full-gate prior pass rate is ≈6e-7 here and ≈5e-6 across eight converted
+  FluxVal drivers, so blind batched rejection finds a start in roughly
+  1–3M evaluations (tens of seconds on one A100) and has no annealing
+  schedule to get stuck in (the single-chain MCMCID-119 search never
+  terminated at this site in two attempts). **But blind rejection cannot
+  tell "rare" from "impossible."** Two FluxVal sites returned zero hits in
+  6e7 draws each and were nearly reported as physically hard sites; their
+  feasible sets were in fact *empty*, because a driver bug zeroed snowfall
+  and the trajectory EDC divides by that pool's total input (see
+  `BUG_COMPAT.md`). Always pair a null screening result with a check that
+  the target is satisfiable at all.
 - **Error bars in minutes**: after capping likelihood-flat Hessian
   directions at the prior's width (`cap_covariance`), the Laplace
   mixture's per-parameter spreads match the MCMC to median ratio **0.92**
