@@ -138,10 +138,31 @@ def cap_covariance(H, cap: float = _PRIOR_VAR):
 
 
 def evidence_weights(P_modes, covs):
-    """Laplace evidence weights over modes (softmax of P + 0.5*logdet)."""
-    logw = np.array([P + 0.5 * np.linalg.slogdet(C)[1]
-                     for P, C in zip(P_modes, covs)])
-    w = np.exp(logw - logw.max())
+    """Laplace evidence weights over modes (softmax of P + 0.5*logdet).
+
+    Modes whose covariance is not usable get weight 0 rather than
+    poisoning the whole vector. This is not hypothetical: the exact
+    Hessian can come back non-finite at a mode sitting on an EDC cliff
+    (second derivatives through a `where` with a -inf branch), and a
+    single NaN logdet used to make `logw.max()` NaN and hence EVERY
+    weight NaN. Downstream that silently degraded to "argmax picks mode
+    0" — which happened to be the best mode, so it looked like it worked.
+
+    Returns uniform weights only if no mode is usable, so callers always
+    get something that sums to 1.
+    """
+    logw = np.full(len(covs), -np.inf)
+    for i, (P, C) in enumerate(zip(P_modes, covs)):
+        C = np.asarray(C)
+        if not np.isfinite(P) or not np.isfinite(C).all():
+            continue
+        sign, logdet = np.linalg.slogdet(C)
+        if sign <= 0 or not np.isfinite(logdet):
+            continue
+        logw[i] = P + 0.5 * logdet
+    if not np.isfinite(logw).any():
+        return np.full(len(covs), 1.0 / len(covs))
+    w = np.exp(logw - logw[np.isfinite(logw)].max())
     return w / w.sum()
 
 

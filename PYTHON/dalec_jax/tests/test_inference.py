@@ -93,6 +93,34 @@ def test_evidence_weights_normalize_and_favour_the_better_mode():
     assert w[0] > w[1]
 
 
+def test_evidence_weights_survive_one_unusable_mode():
+    """A non-finite Hessian at one cliff-side mode must not poison the rest.
+
+    Regression: a single NaN logdet made logw.max() NaN and therefore
+    every weight NaN, which downstream degraded silently to "argmax picks
+    mode 0".
+    """
+    covs = np.stack([np.eye(2), np.full((2, 2), np.nan), np.eye(2)])
+    w = evidence_weights(np.array([-1.0, -0.5, -3.0]), covs)
+    assert np.isfinite(w).all()
+    assert w.sum() == pytest.approx(1.0)
+    assert w[1] == 0.0, "unusable mode must get zero weight"
+    assert w[0] > w[2], "ranking among usable modes preserved"
+
+
+def test_evidence_weights_reject_non_positive_definite_covariance():
+    covs = np.stack([np.eye(2), np.diag([1.0, -1.0])])
+    w = evidence_weights(np.array([-1.0, -0.1]), covs)
+    assert w[1] == 0.0 and w[0] == pytest.approx(1.0)
+
+
+def test_evidence_weights_fall_back_to_uniform_if_nothing_is_usable():
+    covs = np.stack([np.full((2, 2), np.nan), np.full((2, 2), np.nan)])
+    w = evidence_weights(np.array([-1.0, -2.0]), covs)
+    assert w.sum() == pytest.approx(1.0)
+    assert np.allclose(w, 0.5)
+
+
 def test_rwm_shapes_and_acceptance():
     z0 = np.zeros((4, 4))
     out = run_rwm(_banana, z0, np.eye(4), n_iters=200, chunk=100, thin=10,
