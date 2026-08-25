@@ -87,7 +87,7 @@ def multipoint_laplace(logpost, z0, max_iters: int = 400, chunk: int = 20,
                       f"{np.nanmedian(g_last):.2e}", flush=True)
     # fold in the final iterate (its value was never scanned)
     v_fin = np.asarray(jax.jit(jax.vmap(neg))(z))
-    zb, vb = np.asarray(zb), np.asarray(vb)
+    zb, vb = np.array(zb), np.array(vb)     # copy: jax arrays are read-only
     take = np.isfinite(v_fin) & (v_fin < vb)
     zb[take], vb[take] = np.asarray(z)[take], v_fin[take]
     return {"z_end": zb, "P_end": -vb, "gnorm_end": g_last}
