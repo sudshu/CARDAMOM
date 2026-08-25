@@ -14,7 +14,8 @@ against the C's own MCMC and adversarially audited (see below).
 
 > **New to this work? Start with [FINDINGS.md](FINDINGS.md)** — the report
 > for the CARDAMOM group: the key questions answered up front, the two
-> developments in detail, the C-code findings, and every figure.
+> developments in detail, the **CARDAMOM-FluxVal pilot over 8 sites**, the
+> C-code findings, and every figure.
 
 ## Contents
 
@@ -56,7 +57,7 @@ Key methodological findings (details in `tests/TOLERANCES.md`):
 pip install -e ".[test,inference]"
 make -C ../../C/projects/JAX_VALIDATION            # build the oracle
 python tools/gen_fixtures.py                       # generate goldens (~1 min)
-env -u LD_LIBRARY_PATH pytest                      # 30-test equivalence suite
+env -u LD_LIBRARY_PATH pytest                      # 40-test suite
 ```
 
 The demo driver, the 4,000-sample reference posterior, and a viable
@@ -124,6 +125,14 @@ What each piece is worth (demo site):
   the "oracle" full chain covariance on median-parameter mixing. But no
   shape rescues plain RWM here (≥~2e4 iterations per effective sample) —
   see the diagnostics caution in `inference/rwm.py`.
+- **Where it breaks (measured on 8 FluxVal sites, §3 of FINDINGS)**: the
+  optimizer can converge onto the EDC boundary, where the exact Hessian does
+  not exist — only **39 of 64 modes** across those sites have a finite,
+  positive-definite Hessian. When the *best* mode is one of them the Laplace
+  covariance is unusable, and this used to fail silently: NaN covariance →
+  NaN proposals → every Metropolis ratio false → chains frozen on their
+  seeds reporting 0% acceptance. `evidence_weights` now gives unusable modes
+  zero weight and `run_rwm` refuses a non-finite covariance outright.
 - **Known dead ends (measured, don't repeat them)**: vanilla importance
   reweighting of the Laplace mixture collapses in 89-D (weight ESS 1 of
   65,536); NUTS freezes on the hard-EDC target (step size → 2.5e-13) and

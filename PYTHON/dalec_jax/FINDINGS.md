@@ -1,19 +1,26 @@
 # DALEC_1100 in JAX + a Laplace fast path for the MDF — findings for the CARDAMOM group
 
-*Two developments, one report. **Development 1:** DALEC_1100 rewritten in
-JAX and proven numerically identical to the C, with the unmodified C code
-itself as referee. **Development 2:** a Laplace-optimizer "fast path" that
-uses the port's exact gradients to reach the MCMC's answer quicker and to
-provide serviceable error bars in minutes. Every number below is measured;
-every surprising claim has been through two rounds of independent
-adversarial audit (fresh-seed replications, C-oracle re-scoring, designed
-counter-experiments), with all corrections kept on the record. Nothing in
-the C was modified.*
+*Two developments and a benchmark, one report. **Development 1:**
+DALEC_1100 rewritten in JAX and proven numerically identical to the C, with
+the unmodified C code itself as referee. **Development 2:** a
+Laplace-optimizer "fast path" that uses the port's exact gradients to reach
+the MCMC's answer quicker and to provide serviceable error bars in minutes.
+**Then we ran it on CARDAMOM-FluxVal** (§3), which is where it earned its
+keep: it reproduces withheld flux-tower data at six of eight sites, and it
+found two defects in DALEC_1100 that only show up when the model meets a
+site it has not seen.*
+
+*Every number below is measured; every surprising claim has been through
+**three** rounds of independent adversarial audit (fresh-seed replications,
+C-oracle re-scoring, designed counter-experiments), with all corrections
+kept on the record — including the FluxVal audit, which refuted this
+project's own headline finding and is reported as such. Nothing in the C
+was modified.*
 
 *Contact: Sudhanshu Pandey (pandeysu@caltech.edu). Code:
 [`PYTHON/dalec_jax`](./) on this branch (`jax-port`) — self-contained:
 the demo driver and the 4,000-sample reference posterior are committed,
-so goldens, the 30-test suite, and the examples run from a bare clone
+so goldens, the 40-test suite, and the examples run from a bare clone
 plus a C toolchain.*
 
 ---
@@ -52,15 +59,29 @@ or boundary-pressed mass, so the MCMC remains the referee for paper
 numbers.
 
 **Q4 — Should CARDAMOM switch to gradient samplers (HMC/NUTS)?**
-Not as currently formulated (§4): the hard −inf EDC cliffs freeze NUTS
+Not as currently formulated (§5): the hard −inf EDC cliffs freeze NUTS
 during warmup (step size → 2.5×10⁻¹³), and even on a cliff-free variant it
 lost ~6× ESS/s to the existing Metropolis. The random walk is the most
 cost-effective sampler per core on this problem — a measured compliment,
 not a concession. A soft-EDC (penalty) formulation is the prerequisite for
 gradient sampling; untested so far.
 
-**Q5 — Is JAX simply faster than the C?**
-No, and we say so plainly (§4). Per core, the `-O2` C is 1.6× faster on
+**Q5 — Does it reproduce the FluxVal benchmark?**
+Yes at six of eight pilot sites, on data the calibration never saw (§3).
+CARDAMOM-FluxVal withholds a later window of GPP/NEE/ET; the fast path
+reproduces withheld GPP at **r = 0.68–0.83** and withheld ET at
+**r = 0.71–0.84** at six sites, with the MAP confirmed by the C oracle to
+≤1.1×10⁻¹² in log-posterior at all eight and whole GPP trajectories
+agreeing to ≤8×10⁻¹². GPP is biased low everywhere — though the prescribed
+GPP uncertainty is a *factor of 3*, so the assimilation considers those
+fits acceptable. Two sites fail for diagnosable reasons, and the pilot
+turned up two defects in the model: a driver with identically zero snowfall
+makes **every** parameter vector fail the trajectory EDC (in both engines),
+and log-space LAI has no observation threshold, which is what makes
+cliff-edge samples disagree between backends.
+
+**Q6 — Is JAX simply faster than the C?**
+No, and we say so plainly (§5). Per core, the `-O2` C is 1.6× faster on
 forward runs; per box, two A100s ≈ the entire 256-core node. The port's
 value is not forward speed — it's exact derivatives (~1,000× cheaper than
 finite differences on one core) and everything in Q2/Q3 that they unlock.
@@ -210,7 +231,7 @@ legitimate run.*
   89 dimensions — only 2.3% of Gaussian draws survive the EDC cliffs and
   one draw carries all the weight (ESS = 1 of 65,536; PSIS tail
   unfittable). An annealed/SMC bridge would be needed.
-- **NUTS on the hard-EDC target:** frozen in warmup (§4).
+- **NUTS on the hard-EDC target:** frozen in warmup (§5).
 - **More optimizer starts:** 32 → 256 bought +0.36 log-units, the same
   basin, and identical Gaussian errors.
 
@@ -225,9 +246,169 @@ the MCMC; it makes every part of the MCMC's job easier and auditable.
 
 ---
 
-## 3. Other findings about the C code (no JAX required)
+## 3. The CARDAMOM-FluxVal pilot (8 sites)
 
-### 3.1 `CARDAMOM_RUN_MODEL` stale-trajectory hazard
+Eren asked to see the FluxVal comparison. Running one turned out to be the
+most informative thing in this project — it broke three of our own results
+and surfaced two defects in the model itself.
+
+### What FluxVal actually asks
+
+CARDAMOM-FluxVal v1.0 is not an in-sample goodness-of-fit exercise. Each
+driver assimilates the **early** part of a FLUXNET record, and
+`validation_data/validation_<SITE>.csv` holds a strictly **later**,
+non-overlapping window of GPP, NEE and ET that the calibration never sees
+(DK-Sor: assimilated months 0–82, withheld 84–168; zero index overlap at
+every site). Skill on the withheld window is the number that means
+something.
+
+We converted eight sites spanning land-cover classes from the legacy binary
+CBF format to the current netCDF schema for DALEC_1100, decoding the format
+against `MATLAB/io_fun/CARDAMOM_READ_BINARY_FILEFORMAT.m`. That reader also
+showed **the files prescribe their own observation uncertainties**: GPP and
+ET as multiplicative *factors* of 3.0 (the log-space likelihood branch)
+with 0.1 thresholds, NBE additive 1.0 gC/m²/d, ABGB a factor of 1.05. Our
+first pass used additive placeholders — wrong branch and wrong magnitude —
+which silently reweighted every fit; correcting it moved BE-Vie's in-sample
+GPP RMSE from 4.36 to 1.75.
+
+### The engines agree where it matters
+
+Every site: 256 iid prior draws through both engines with **identical
+acceptance-gate patterns**, then the C oracle re-scoring every screened hit
+and every optimizer mode.
+
+| site | ID | prior feas. | best model-P (JAX = C) | \|ΔP\| at best mode | GPP trajectory | usable curvature | RWM acc. | chains moved |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 26 | BE-Vie (MF) | 6.3e-6 | −39.6 | 1.8e-13 | 2e-12 | 7/8 | 12.1% | 0.98 |
+| 55 | CZ-wet (WET) | 5.2e-6 | −84.4 | 4.7e-13 | 8e-12 | 5/8 | 11.6% | 1.20 |
+| 57 | DE-Geb (CRO) | 6.6e-6 | −326.9 | 1.1e-13 | 1e-13 | 2/8 | 9.7% | 1.25 |
+| 58 | DE-Gri (GRA) | 7.8e-6 | −47.1 | 2.6e-13 | 2e-13 | 6/8 | 15.4% | 1.20 |
+| 71 | DK-Sor (DBF) | 6.3e-6 | −1346.4 | 2.3e-13 | 2e-13 | 5/8 | 2.2% | 0.32 |
+| 82 | FR-Pue (EBF) | 5.6e-6 | −131.8 | 5.1e-13 | 9e-14 | 4/8 | 9.9% | 1.10 |
+| 178 | ES-LJu (OSH) | 3.1e-6 | −180.0 | 1.1e-13 | 6e-14 | 5/8 | 0.6% | 0.01 |
+| 183 | NL-Loo (ENF) | 6.3e-6 | −343.7 | 1.1e-12 | 3e-13 | 5/8 | 4.7% | 1.25 |
+
+The MAP the fast path returns is confirmed by the C to **≤1.1e-12 in log
+posterior at every site**, and whole monthly GPP trajectories agree to
+≤8e-12. Prior feasibility is ~3–8e-6 everywhere; we deliberately do **not**
+claim a site-to-site spread, because each rate rests on exactly 16 hits
+(σ(log rate) ≈ 0.25) and the differences are ~1σ.
+
+### Withheld-window skill
+
+64-draw chain-ensemble mean against data the calibration never saw. GPP and
+NEE in gC m⁻² d⁻¹, ET in mm d⁻¹.
+
+| site | GPP RMSE | GPP bias | GPP r | NEE RMSE | NEE bias | NEE r | ET RMSE | ET r |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| BE-Vie | 2.95 | −1.62 | **0.80** | 1.20 | −0.18 | **0.81** | 0.58 | **0.77** |
+| CZ-wet | 2.62 | −1.38 | **0.83** | 1.18 | −0.18 | 0.59 | 0.91 | **0.81** |
+| DE-Geb | 3.20 | −0.62 | **0.74** | 2.40 | 0.10 | 0.48 | 0.59 | **0.79** |
+| DE-Gri | 3.64 | −2.39 | **0.82** | 1.14 | 0.14 | 0.65 | 0.47 | **0.84** |
+| DK-Sor | 8.09 | −5.77 | 0.24 | 3.14 | 1.62 | 0.40 | 0.85 | 0.73 |
+| FR-Pue | 1.20 | −0.18 | 0.68 | 0.79 | 0.13 | 0.58 | 0.45 | **0.80** |
+| ES-LJu | 0.74 | −0.49 | −0.49 | 1.20 | 1.07 | −0.40 | 0.70 | −0.07 |
+| NL-Loo | 3.02 | −2.06 | 0.70 | 1.43 | 1.00 | 0.68 | 0.77 | 0.71 |
+
+Six of eight sites reproduce withheld GPP at r = 0.68–0.83 and withheld ET
+at r = 0.71–0.84 without ever seeing that window. **GPP is biased low at all
+eight sites** — worth noting that the prescribed GPP uncertainty is a factor
+of 3, so the likelihood is satisfied by anything between a third and three
+times the observation: a site can carry a large bias in gC m⁻² d⁻¹ and still
+be, to the assimilation, a good fit. RMSE and the log-posterior are
+answering different questions here.
+
+Two sites do not work, for different and diagnosable reasons — see below.
+
+![FluxVal pilot](docs/figures/fluxval_pilot.png)
+
+### The limitation this pilot exposed in the fast path
+
+**The optimizer converges onto the EDC boundary, where curvature does not
+exist.** Across the eight sites only **39 of 64 modes (61%)** have a finite,
+positive-definite exact Hessian; the rest sit on the cliff. When the *best*
+mode is one of those, the Laplace covariance is unusable — and the failure
+was silent: a NaN covariance yields NaN proposals, every Metropolis ratio
+compares false, and the chains sit exactly on their seeds reporting 0%
+acceptance, which reads as a merely hard target. At DK-Sor the tuner walked
+the step size down four times chasing an acceptance rate that could never
+rise, and produced a "posterior ensemble" that was 64 copies of one point,
+with plausible-looking skill numbers.
+
+The fast path now builds its proposal from the best mode whose curvature *is*
+usable and refuses a non-finite covariance outright. That recovered DE-Geb
+(0% → 9.7%) and DK-Sor (0% → 2.2%). ES-LJu still barely moves: its best mode
+is on the boundary and the nearest usable one is 587 log-units worse, so we
+report its MAP and mark the ensemble as degenerate rather than dress a single
+point up as a posterior. **This never appeared at the single demo site; it
+took eight new ones.**
+
+### Two defects in the model, found the hard way
+
+**1. A driver with zero snowfall makes DALEC_1100 uncalibratable.** The
+trajectory EDC forms Fin/Fout per pool and `H2O_SWE`'s only input flux is
+snowfall, so a driver with identically zero snowfall gives Fin = 0 and that
+EDC is −inf/NaN for *every* parameter vector. Measured in **both** engines on
+the bundled demo site (512 posterior vectors): as shipped 512/512 feasible;
+with snowfall set to exactly 0.0, **0/512**; with 1e-300, 512/512 again.
+Production escapes this only because ERA5-derived snowfall carries float
+residue — the demo driver's largest snowfall value is 1.7e-15 mm/d and 211
+of its 240 months are exact zeros. Any genuinely snow-free site is exposed,
+and the symptom is an EDC search that never converges rather than an error.
+We found it by writing a snow proxy that zeroed two Mediterranean sites, then
+very nearly reporting them as physically hard sites. After the fix they screen
+normally and FR-Pue is among the best-fitting sites in the pilot.
+
+**2. Log-space LAI has no observation threshold.** GPP and ET carry an explicit
+`min_threshold` (0.1) precisely so log-transformed values are insensitive near
+zero. LAI is compared the same way and has none — in the FluxVal drivers and in
+the production template alike. A draw whose vegetation dies therefore takes
+`log()` of a denormal. On BE-Vie's screening hits, the three draws where the C,
+JAX-on-GPU and JAX-on-CPU *disagree about whether the sample is feasible at all*
+have minimum LAI of 2.7e-34, 8.5e-56 and 3.9e-236; every hit whose LAI stays
+above 1e-6 agrees bit-for-bit across all three engines. Practical consequence:
+**screening hits are not a valid equivalence reference** — they sit on the cliff
+by construction. Optimizer modes are interior and agree to ~1e-13.
+
+### Honest scope
+
+- The met proxies are the weakest part of this pilot. DALEC_1100 needs four
+  fields the 1005-era drivers lack; we fill them with documented
+  approximations, and the Brunt longwave in particular is clear-sky (~10–12%
+  low). **Replace these with ERA5 before quoting any number here as a property
+  of DALEC_1100.**
+- Chains are short: these are mode-region ensembles, not converged posteriors.
+- Model NBE is compared directly against tower NEE, legitimate here only
+  because burned area is identically zero at all eight sites.
+- At DK-Sor we could not reach the observed productivity by either route:
+  every mode gives mean GPP ≤ 1.06 against an observed 5.57, and of 3,614
+  independent known-good parameter vectors, **none of the 541 feasible ones**
+  reaches 70% of observed productivity (BE-Vie has 26, CZ-wet 149). That says
+  "do not quote a fit at DK-Sor", **not** "the model cannot be that
+  productive" — the probe vectors come from one site's posterior and are
+  calibrated to its productivity. Settling it needs a dedicated search, ERA5
+  drivers, and the C's MCMC as referee.
+
+### What the 204-site campaign needs first
+
+Each site takes ~36 minutes on one A100 and **almost none of it is
+arithmetic** — the GPUs sit idle while XLA compiles, chiefly the 89×89 exact
+Hessian (forward-over-reverse through a 240-step scan). Because the target
+closes over each site's driver and observation arrays, those become
+compile-time constants and *every site recompiles from scratch*.
+
+All 204 sites share the same shapes (192 timesteps, 89 parameters), so passing
+site data as traced arguments would let one compilation serve every site. The
+obstacle is that valid-observation counts differ per site (GPP ranges 42–84
+months), which changes array shapes; padding the observation index arrays to a
+common length with a zero-weight mask removes it. That single change is what
+turns a ~75 GPU-hour campaign into an afternoon, and it is the concrete thing
+we would want to do before running all 204.
+
+## 4. Other findings about the C code (no JAX required)
+
+### 4.1 `CARDAMOM_RUN_MODEL` stale-trajectory hazard
 
 `DALEC_MLF2.c:47` skips the model call when a sample fails the prerun
 EDCs — but `CARDAMOM_RUN_MODEL.c:424–425` writes the output buffers
@@ -238,7 +419,7 @@ oracle calls `DALEC_1100()` directly with per-sample zeroed buffers).
 Recommend zeroing/flagging skipped samples or documenting the behavior
 prominently.
 
-### 3.2 Defect catalog from line-by-line transcription
+### 4.2 Defect catalog from line-by-line transcription
 
 Each is reproduced **exactly** in the JAX port (policy: bug-compatible,
 never silently fixed), so the two engines stay interchangeable while you
@@ -265,7 +446,7 @@ it predates this work and should carry a deprecation note.
 
 ---
 
-## 4. The benchmarks in full
+## 5. The benchmarks in full
 
 All numbers measured on 2× AMD EPYC 7H12 (256 cores) + 2× A100-40GB; C
 compiled `-O2` for performance rows; JAX float64 with strict-equivalence
@@ -318,7 +499,7 @@ deliberate ~1:1 proof-to-model ratio that any future DALEC port can reuse.
 
 ---
 
-## 5. A proposed joint next step
+## 6. A proposed joint next step
 
 **A one-to-two-day, 204-site FluxVal campaign using both engines** (the
 drivers ship in `DATA/CARDAMOM-FLUXVAL_v1.0/`):
@@ -340,7 +521,7 @@ C at any core count.
 
 ---
 
-## 6. Getting it / reproducing
+## 7. Getting it / reproducing
 
 See the [README](README.md) for quick start, environment gotchas, and the
 docs map ([`BUG_COMPAT.md`](BUG_COMPAT.md),
@@ -360,5 +541,5 @@ re-scoring of modes and feasibility hits, source/log verification,
 designed counter-experiments). Four statements did not survive in their
 original form and are corrected in place above: the start-search cost
 accounting (§2.3), "all 16" modes (§2.1 — it's 15 of 16), the
-finite-difference agreement wording (§4), and an ESS interpretation in the
+finite-difference agreement wording (§5), and an ESS interpretation in the
 proposal test (§2.3).*
