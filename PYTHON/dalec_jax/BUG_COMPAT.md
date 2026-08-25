@@ -52,3 +52,27 @@ produced two such sites and they were initially misread as physically hard.
 Not a transcription issue — the port reproduces the C exactly — so there is
 no `bug_compat.py` entry. Fixing it upstream (guarding `Fin == 0`, or
 excluding pools with no active input from the EDC) is a scientific change.
+
+## Model-level hazard: log-space LAI has no obs threshold
+
+The positive-definite observation streams are given multiplicative
+uncertainties and compared in log space (`opt_unc_type=1`). GPP and ET carry
+an explicit `min_threshold` (0.1 in the FluxVal drivers) for exactly the
+documented reason — "this ensures log-transformed model values are
+insensitive to GPP<0.1". **LAI carries none**, in the FluxVal drivers and in
+the bundled production template alike.
+
+So a parameter draw whose vegetation dies produces `log(LAI)` of a denormal.
+Measured on site 26's screening hits: the three draws where the C, JAX-on-GPU
+and JAX-on-CPU *disagree about whether the sample is even feasible* have
+minimum LAI of 2.7e-34, 8.5e-56 and 3.9e-236, numerically zero for 169–189 of
+192 months. Whether such a value lands on exact 0.0 (giving `-inf`) or on a
+denormal (giving a huge finite penalty, e.g. P = -5.5e7) is decided by the
+last bit, so the accept/reject verdict is not stable across backends. Every
+hit whose LAI stays above 1e-6 agrees bit-for-bit across all three engines.
+
+Consequence for users: **screening hits are not a valid equivalence
+reference** — they sit on the EDC cliff by construction. Optimizer modes are
+interior and agree to ~1e-12. Giving LAI a `min_threshold` on the pattern
+GPP and ET already use would remove the instability, but it changes the
+likelihood, so it is a recommendation rather than something done here.
