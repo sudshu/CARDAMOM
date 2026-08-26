@@ -434,7 +434,48 @@ Practical consequence: **screening hits are not a valid equivalence
 reference** — they sit on the cliff by construction. Optimizer modes are
 interior and agree to ~1e-13.
 
-### 3.6 Honest scope
+### 3.6 What a 204-site campaign actually costs
+
+Measured: **37.4 min per site** on one A100 (eight sites, 35.3–39.5 min), so
+204 sites is **~127 GPU-hours — about 64 h on two A100s** as this pipeline
+stands.
+
+Where the time goes. These come from varying the amount of work inside a
+single call; repeating an identical call measures nothing here, because
+`exact_hessians` and `multipoint_laplace` both build their jitted function
+inside the call and so recompile every time.
+
+| stage | compile (once) | compute | per site |
+| --- | ---: | ---: | --- |
+| exact Hessians | 205.7 s | 4.1 s per mode | ~4 min, **86% compile** |
+| L-BFGS optimizer | 4.7 s | 266.3 s per 20-iter chunk | ~25 min, **~0% compile** |
+
+The compile-heavy stage is real but small; the stage that dominates is
+essentially pure compute. So sharing compilation between sites — the obvious
+first idea, since every site currently recompiles — would save about **9%**,
+not an order of magnitude.
+
+**The real lever is batching across sites**, because the optimizer is
+launch-latency bound rather than FLOP bound. The forward benchmark shows the
+same effect (0.772 ms/run at batch 128 vs 0.029 ms/run at batch 4000), and it
+holds for the optimizer itself — one 20-iteration chunk:
+
+| starts in one vmap | wall | per start |
+| ---: | ---: | ---: |
+| 4 | 278.0 s | 69.5 s |
+| 16 | 262.4 s | 16.4 s |
+| 64 | 328.2 s | 5.1 s |
+
+Sixteen times the work for 1.18× the wall clock. Four sites' worth of starts
+in one vmap already cuts the dominant stage ~3×; larger batches should do
+better still, though we have not measured beyond 64.
+
+The prerequisite either way: valid-observation counts differ by site (GPP
+ranges 42–84 months), so the observation index arrays need padding to a common
+length with a zero-weight mask before sites can share a vmap. At the measured
+3× the campaign lands near **20 h on two A100s**.
+
+### 3.7 Honest scope
 
 - **The met proxies are the weakest part of this pilot.** DALEC_1100 needs
   four fields the 1005-era drivers lack; we fill them with documented
@@ -550,7 +591,7 @@ deliberate ~1:1 proof-to-model ratio that any future DALEC port can reuse.
 
 ## 6. A proposed joint next step
 
-**A one-to-two-day, 204-site FluxVal campaign using both engines** (the
+**A 204-site FluxVal campaign using both engines** (budget two to three days on the current node; see §3.6 for the measured per-site cost) (the
 drivers ship in `DATA/CARDAMOM-FLUXVAL_v1.0/`):
 
 1. Batched GPU rejection + Laplace optimization finds starts and modes for
@@ -561,7 +602,10 @@ drivers ship in `DATA/CARDAMOM-FLUXVAL_v1.0/`):
    400-chain ADEMCMC config ~28 core-hours/site (~1 node-day for all
    204) — now seeded and proposal-shaped by step 1;
 3. the repaired-Laplace pass provides per-site provisional uncertainty and
-   the MAP-gap convergence audit (~2 h).
+   the MAP-gap convergence audit — **measured at 37.4 min/site in the pilot,
+   so ~64 h on two A100s as-is, or near 20 h once sites share a vmap**
+   (§3.6); an earlier estimate of "~2 h" for this step predated the pilot
+   and was far too optimistic.
 
 The same certified-equivalent pair also opens: parameter sensitivity and
 observing-system design via exact derivatives, soft-EDC samplers, hybrid
