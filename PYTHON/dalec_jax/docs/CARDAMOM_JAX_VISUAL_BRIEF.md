@@ -40,7 +40,15 @@ The C and JAX posterior summaries were calculated independently. Their overlap i
 
 **Agentic-coding lesson:** the new model contains 1,888 hand-written JAX lines—and about 2,016 additional lines devoted to the oracle and tests. Generating code was the short part; proving equivalence was the project.
 
-The model was transcribed from the **C source**, not from papers: a paper cannot specify operation order, a 7-digit π, or which defects to preserve. Papers supplied the methodology ([arXiv:2606.07681](https://arxiv.org/abs/2606.07681)), the EDC background, the model lineage, and the FluxVal protocol.
+**What the papers were for.** Three distinct roles, worth separating:
+
+| source | role |
+| --- | --- |
+| the **C source** | the model definition — a paper cannot specify operation order, a 7-digit π, or which defects to preserve |
+| the **CARDAMOM papers** | the **acceptance test**. Reproducing their analyses was a stated requirement of this work, not background reading |
+| [arXiv:2606.07681](https://arxiv.org/abs/2606.07681) | the method — oracle-first translation with golden I/O and repair loops |
+
+Residence times, NPP allocation fractions, the CH₄ aerobic:anaerobic partition, NBE seasonality and the CI envelopes are implemented once and run from **both** engines: **59/59 derived quantities agree to ≤10⁻¹⁰**. This is the gate that matters to a modeller — a port can pass every per-timestep comparison and still get a published number wrong, because the derived quantities integrate over the whole trajectory.
 
 ---
 
