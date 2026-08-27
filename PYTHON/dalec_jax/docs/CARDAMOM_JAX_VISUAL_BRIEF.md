@@ -6,7 +6,7 @@
 
 **A verified differentiable companion to CARDAMOM—not a replacement for the C model.**
 
-[Full findings](../FINDINGS.md) · [Code and quick start](../README.md) · [JAX branch](https://github.com/sudshu/CARDAMOM/tree/jax-port/PYTHON/dalec_jax)
+[Full findings](../FINDINGS.md) · [Concept diagrams](https://github.com/sudshu/CARDAMOM/blob/jax-port/PYTHON/dalec_jax/docs/CONCEPTS.md) · [Code and quick start](../README.md) · [JAX branch](https://github.com/sudshu/CARDAMOM/tree/jax-port/PYTHON/dalec_jax)
 
 </div>
 
@@ -36,7 +36,11 @@ The C and JAX posterior summaries were calculated independently. Their overlap i
 - Stable trajectories agree to **≤10⁻¹⁰ per timestep and variable**
 - ULP-sensitive trajectories are tested against the C model's own perturbation envelope
 
+![How the port was built](figures/method_oracle_first.png)
+
 **Agentic-coding lesson:** the new model contains 1,888 hand-written JAX lines—and about 2,016 additional lines devoted to the oracle and tests. Generating code was the short part; proving equivalence was the project.
+
+The model was transcribed from the **C source**, not from papers: a paper cannot specify operation order, a 7-digit π, or which defects to preserve. Papers supplied the methodology ([arXiv:2606.07681](https://arxiv.org/abs/2606.07681)), the EDC background, the model lineage, and the FluxVal protocol.
 
 ---
 
@@ -55,6 +59,10 @@ That is **not** a claim that the forward model is 1,000× faster. It is one core
 ---
 
 ## 3 — Gradients change the inference workflow
+
+![Laplace-guided MCMC](figures/laplace_guided_mcmc.png)
+
+The optimizer does **not** replace the chain. It supplies the three things the chain would otherwise have to discover for itself: where to start, which way to step, and what answer to expect. The C MCMC still delivers the published posterior.
 
 ![Three inference results](figures/inference_three_ways.png)
 
