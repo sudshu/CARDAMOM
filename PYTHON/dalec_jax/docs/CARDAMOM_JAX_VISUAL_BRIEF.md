@@ -17,8 +17,10 @@
 | **Verified** | **Differentiable** | **Useful now** | **Honest limitation** |
 | :---: | :---: | :---: | :---: |
 | ≤10⁻¹⁰ agreement | all 89 sensitivities together | modes, curvature, batching | C is faster per core forward |
-| 60,000 EDC decisions: **0 mismatches** | gradient: **0.083 ms/sample** at batch | 15/16 modes ≥ chain best | hard EDCs defeat NUTS |
+| 60,000 EDC operator slots: **0 mismatches** | gradient: **0.083 ms/sample** at batch | 15/16 modes ≥ chain best | hard EDCs defeat NUTS |
 | 59/59 analyses reproduced | ≈**1,000×** one-core finite differences | 6/8 FluxVal sites generalize | MCMC remains the referee |
+
+<sub>EDC figure is operator-level: the JAX EDC operator applied to the C's own trajectories. End-to-end, 1,683 of 60,000 differ, every one inside the C's certified ULP-chaos envelope.</sub>
 
 > **The one-line story:** JAX does not make every model call faster. It makes gradients, curvature, batched experiments, and inference diagnostics practical while retaining the C model as the numerical authority.
 
@@ -48,7 +50,7 @@ The C and JAX posterior summaries were calculated independently. Their overlap i
 
 ### ≈1,000× faster for the audited, batched all-parameter gradient
 
-That is **not** a claim that the forward model is 1,000× faster. The older 420× result used a smaller model-only workload; the current comparison includes the model, EDCs, and likelihood.
+That is **not** a claim that the forward model is 1,000× faster. It is one core against one core, on the full workload — model, EDCs and likelihood. Per box, two A100s roughly match the whole 256-core node.
 
 ---
 
@@ -70,9 +72,14 @@ That is **not** a claim that the forward model is 1,000× faster. The older 420�
 
 ### Six of eight sites reproduce withheld GPP and ET seasonality
 
-- GPP correlation: **0.68–0.83** at the six successful sites
-- ET correlation: **0.71–0.84**
+- GPP correlation: **0.67–0.97** at the six successful sites
+- ET correlation: **0.75–0.97**
 - Every JAX MAP was re-scored by C to within **1.1×10⁻¹²** in log-posterior
+
+*Driver caveat: three met fields DALEC_1100 needs are absent from the
+1005-era FluxVal files and are filled here with documented proxies — the
+longwave one measures 8.8–13.8% low against ERA5. Real ERA5-Land drivers are
+in hand and the re-run is under way, so these numbers will move.*
 
 The multi-site pilot also found what the demonstration site hid: only **39/64** modes had usable curvature, zero snowfall can invalidate every parameter vector, and near-zero LAI needs an explicit log-space threshold.
 
