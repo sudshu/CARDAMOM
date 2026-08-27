@@ -30,7 +30,7 @@ plus a C toolchain.*
 | | |
 | --- | --- |
 | **Is the JAX model the same model?** | Yes — ≤10⁻¹⁰ per timestep per variable against the unmodified C; 59/59 paper-style derived quantities identical |
-| **Does it reproduce FluxVal?** | Withheld-window GPP *r* = 0.68–0.83 and ET *r* = 0.71–0.84 at six of eight pilot sites |
+| **Does it reproduce FluxVal?** | Withheld-window GPP *r* = 0.67–0.97 and ET *r* = 0.75–0.97 at six of eight pilot sites |
 | **Is the optimizer faster to the answer?** | Modes beat the production chain's best stored sample; proposal shape mixes 2.4–3× better |
 | **Are the Laplace error bars usable?** | For screening and QC (widths match the MCMC to a median ratio 0.92); not for publication |
 | **Should CARDAMOM adopt HMC/NUTS?** | Not as currently formulated — the hard EDC cliffs freeze it |
@@ -93,8 +93,8 @@ gradient sampling; untested so far.
 **Q5 — Does it reproduce the FluxVal benchmark?**
 Yes at six of eight pilot sites, on data the calibration never saw (§3).
 CARDAMOM-FluxVal withholds a later window of GPP/NEE/ET; the fast path
-reproduces withheld GPP at **r = 0.68–0.83** and withheld ET at
-**r = 0.71–0.84** at six sites, with the MAP confirmed by the C oracle to
+reproduces withheld GPP at **r = 0.67–0.97** and withheld ET at
+**r = 0.75–0.97** at six sites, with the MAP confirmed by the C oracle to
 ≤1.1×10⁻¹² in log-posterior at all eight and whole GPP trajectories
 agreeing to ≤8×10⁻¹². GPP is biased low everywhere — though the prescribed
 GPP uncertainty is a *factor of 3*, so the assimilation considers those
@@ -282,8 +282,10 @@ FluxVal is **not** an in-sample goodness-of-fit exercise. Each driver
 assimilates the *early* part of a FLUXNET record, and
 `validation_data/validation_<SITE>.csv` holds a strictly *later*,
 non-overlapping window of GPP, NEE and ET that the calibration never sees.
-DK-Sor, for example, assimilates months 0–82 and is validated on 84–168;
-the overlap is zero at every site.
+DK-Sor, for example, assimilates model months 0–82 and is validated on
+83–167; the overlap is zero at every site. The record runs **2001-01 to
+2016-12**, and the validation CSVs' `ID` column is **1-based** relative to
+that axis — see the correction in §3.2.
 
 **Skill on that withheld window is the number that means something.** We
 were initially measuring in-sample fit, which is a different and much
@@ -304,20 +306,32 @@ BE-Vie's in-sample GPP RMSE from 4.36 to 1.75.
 
 ![Withheld-window skill](docs/figures/fluxval_withheld_skill.png)
 
-**Six of eight sites reproduce withheld GPP at r = 0.68–0.83 and withheld ET
-at r = 0.71–0.84**, on months the calibration never saw. Two sites fail, for
+**Six of eight sites reproduce withheld GPP at r = 0.67–0.97 and withheld ET
+at r = 0.75–0.97**, on months the calibration never saw. Two sites fail, for
 diagnosable reasons given in §3.5.
+
+> **Correction (2026-08-27).** An earlier version of this table read the
+> validation CSVs' `ID` column as 0-based and so scored the model one month
+> ahead of every withheld observation. It is 1-based: across all 204 files,
+> **6,338 of 6,338 rows** satisfy `Date == 2001-01 + (ID − 1) months`, with
+> zero matching the 0-based reading, and the record runs 2001-01 to 2016-12
+> (pinned independently by the shipped CO₂ column, whose first and last
+> annual means are 371.1 and 404.2 ppm against Mauna Loa's 371.3 for 2001 and
+> 404.4 for 2016). The table below is the corrected alignment; it is better
+> than what we first published, e.g. BE-Vie GPP r 0.80 → 0.97 and NL-Loo
+> 0.70 → 0.95. `scripts/fluxval_check_alignment.py` re-derives this from the
+> shipped data alone.
 
 | site | GPP *r* | GPP RMSE | NEE *r* | NEE RMSE | ET *r* | ET RMSE |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| BE-Vie (MF) | **0.80** | 2.95 | **0.81** | 1.20 | **0.77** | 0.58 |
-| CZ-wet (WET) | **0.83** | 2.62 | 0.59 | 1.18 | **0.81** | 0.91 |
-| DE-Geb (CRO) | **0.74** | 3.20 | 0.48 | 2.40 | **0.79** | 0.59 |
-| DE-Gri (GRA) | **0.82** | 3.64 | 0.65 | 1.14 | **0.84** | 0.47 |
-| DK-Sor (DBF) | 0.24 | 8.09 | 0.40 | 3.14 | 0.73 | 0.85 |
-| FR-Pue (EBF) | 0.68 | 1.20 | 0.58 | 0.79 | **0.80** | 0.45 |
-| ES-LJu (OSH) | −0.49 | 0.74 | −0.40 | 1.20 | −0.07 | 0.70 |
-| NL-Loo (ENF) | 0.70 | 3.02 | 0.68 | 1.43 | 0.71 | 0.77 |
+| BE-Vie (MF) | **0.97** | 2.42 | **0.91** | 0.84 | **0.96** | 0.29 |
+| CZ-wet (WET) | **0.92** | 2.37 | **0.79** | 0.88 | **0.97** | 0.74 |
+| DE-Geb (CRO) | 0.67 | 3.34 | 0.57 | 2.23 | **0.91** | 0.42 |
+| DE-Gri (GRA) | **0.92** | 3.44 | **0.77** | 0.95 | **0.96** | 0.25 |
+| DK-Sor (DBF) | 0.28 | 8.08 | 0.24 | 3.19 | **0.79** | 0.77 |
+| FR-Pue (EBF) | 0.67 | 1.21 | **0.75** | 0.62 | **0.75** | 0.49 |
+| ES-LJu (OSH) | −0.06 | 0.73 | −0.07 | 1.17 | 0.38 | 0.69 |
+| NL-Loo (ENF) | **0.95** | 2.68 | **0.89** | 1.19 | **0.93** | 0.46 |
 
 *64-draw chain-ensemble mean. GPP and NEE in gC m⁻² d⁻¹, ET in mm d⁻¹.*
 
