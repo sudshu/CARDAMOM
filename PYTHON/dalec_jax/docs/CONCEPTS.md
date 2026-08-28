@@ -13,7 +13,7 @@ level, against tolerances fixed before any porting started.
 
 ```mermaid
 flowchart TB
-    ASK["<b>The instruction</b><br/>“Convert DALEC_1100 from C to JAX — and write tests in which<br/>the <b>old C code</b> produces the reference output the JAX must reproduce.”<br/><i>the second clause is the whole design</i>"]
+    ASK["<b>The instruction</b><br/>“Convert DALEC_1100 from C to JAX. Write tests in which the <b>old C code</b> produces<br/>the reference output the JAX must reproduce — and the <b>canonical CARDAMOM-paper<br/>analyses</b> must be reproducible identically from either engine.”<br/><i>the referee and the acceptance test were both fixed in the prompt</i>"]
 
     subgraph LOOP [" "]
         direction LR
@@ -23,7 +23,9 @@ flowchart TB
         J -- "mismatch → <b>classify, don't patch</b><br/><small>transcription bug · XLA op semantics · irreducible ULP</small>" --> C
     end
 
-    GATE["<b>A tolerance contract, fixed before porting</b><br/>leaf modules 1e-15 · sub-step checkpoints 1e-13 · trajectories 1e-10<br/>EDC gates <b>exact</b> · likelihood 1e-12 · paper analyses 1e-10<br/><i>every override must cite a measured cause, not a hunch</i>"]
+    GATE["<b>A tolerance contract, fixed before porting</b><br/>leaf modules 1e-15 · sub-step checkpoints 1e-13 · trajectories 1e-10<br/>EDC gates <b>exact</b> · likelihood 1e-12 · <b>paper analyses 1e-10</b><br/><i>every override must cite a measured cause, not a hunch</i>"]
+
+    PAPERS["<b>The acceptance test comes from the literature</b><br/>residence times · NPP allocation · CH₄ partition · NBE seasonality · CI envelopes<br/>implemented once, run from <b>both</b> engines: <b>59/59 derived quantities ≤1e-10</b><br/><i>a port can pass every per-timestep test and still get a published number wrong</i>"]
 
     AUDIT["<b>Adversarial audit</b><br/>a fresh agent is told to <b>refute</b> each surprising claim,<br/>never to confirm it<br/><br/>3 rounds — each overturned a headline claim"]
 
@@ -31,7 +33,7 @@ flowchart TB
 
     OUT["≤1e-10 per timestep and variable · 60,000 EDC operator slots, 0 mismatches · 59/59 paper analyses reproduced<br/>C defects reproduced deliberately and catalogued, never silently “fixed” — so the two engines stay interchangeable"]
 
-    ASK --> LOOP --> GATE --> AUDIT --> OUT
+    ASK --> LOOP --> GATE --> PAPERS --> AUDIT --> OUT
     GATE --> EFFORT
 
     classDef ref fill:#fdf0ef,stroke:#b2182b,stroke-width:2px,color:#1a1a1a
@@ -40,15 +42,21 @@ flowchart TB
     classDef good fill:#eef7f0,stroke:#2a9d5c,stroke-width:2px,color:#1a1a1a
     class C,AUDIT ref
     class J,ASK,OUT cand
-    class GATE neutral
+    class GATE,PAPERS neutral
     class EFFORT good
 ```
 
-**Note on sources.** The model was transcribed from the **C source**, not from
-papers — papers cannot specify operation order, a 7-digit π, or which defects
-to preserve. The methodology follows arXiv:2606.07681; Bloom & Williams (2015),
-Norton et al. (2023) and Yang et al. (2022) informed the EDCs, the model
-lineage and the FluxVal protocol respectively.
+**Note on sources — three distinct roles.**
+
+| source | role |
+| --- | --- |
+| the **C source** | the model definition — a paper cannot specify operation order, a 7-digit π, or which defects to preserve |
+| the **CARDAMOM papers** (Bloom & Williams 2015; Bloom et al. 2016; Norton et al. 2023; Yang et al. 2022) | the **acceptance test** — reproducing their analyses identically from both engines was a stated requirement, and it is the final gate: residence times, NPP allocation, the CH₄ aerobic:anaerobic partition, NBE seasonality and CI envelopes, **59/59 derived quantities ≤10⁻¹⁰** |
+| **arXiv:2606.07681** | the method — oracle-first translation with golden I/O and repair loops |
+
+The paper-analysis gate is the one a modeller should care about: a port can
+pass every per-timestep comparison and still get a published number wrong,
+because derived quantities integrate over the whole trajectory.
 
 ---
 

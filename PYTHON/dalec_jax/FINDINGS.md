@@ -139,7 +139,7 @@ must reproduce them:
 | EDCs | 60,000 slots over 4,000 posterior samples (JAX EDC operator applied to the C's own trajectories) | **zero mismatches** (booleans, −inf sentinels, short-circuit masks exact) |
 | Likelihood terms + total P | 31 terms, sentinel paths | ≤10⁻¹²; sentinels exact |
 | End-to-end posterior sweep | 4,000 real MCMC samples | green under a three-clause gate |
-| Paper-analysis quantities | 59 derived numbers | 59/59 ≤10⁻¹⁰ from both engines |
+| Paper-analysis quantities (the stated acceptance test: residence times, NPP allocation, CH₄ partition, NBE seasonality, CI envelopes from the CARDAMOM literature) | 59 derived numbers | 59/59 ≤10⁻¹⁰ from both engines |
 
 One finding worth knowing for *any* DALEC verification effort:
 **DALEC_1100 is ULP-chaotic for a subset of parameter draws** — perturbing
