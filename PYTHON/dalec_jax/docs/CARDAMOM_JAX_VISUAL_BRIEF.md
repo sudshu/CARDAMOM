@@ -70,7 +70,7 @@ That is **not** a claim that the forward model is 1,000× faster. It is one core
 
 ![Laplace-guided MCMC](figures/laplace_guided_mcmc.png)
 
-The optimizer does **not** replace the chain. It supplies the three things the chain would otherwise have to discover for itself: where to start, which way to step, and what answer to expect. The C MCMC still delivers the published posterior.
+The optimizer does **not** replace the chain. Multiple gradient starts find **every mode** (a single chain sees only the basin it lands in), each mode gets its own Laplace step-shape and evidence weight, and chains are seeded across modes in proportion to weight. Note the ellipses are only local quadratics — the true ridges curve away from them, which is exactly why the C MCMC still delivers the published posterior.
 
 ![Three inference results](figures/inference_three_ways.png)
 
