@@ -230,6 +230,55 @@ create weight-eating blobs; exp(P) weighting fails in high-D; cliff
 Hessians thin the anchors). None of these failures were visible at the
 previous rung.
 
+### H100 changes the Newton verdict (microbenchmark, 2026-08-28)
+
+Warm steady-state per-iteration cost on the real NL-Loo target
+(`opt_iter_bench.py`; compiles excluded; L-BFGS = optax lbfgs+zoom,
+Newton = exact Hessian + eigendecomposition + 8-point line search):
+
+| device | batch | L-BFGS s/iter | Newton s/iter | ratio N/L |
+| --- | --- | --- | --- | --- |
+| A100 (smoke, no line search) | 4 | 16.5 | ~48 | ~3 |
+| **H100 NVL** | 4 | 5.66 | **0.48** | **0.085** |
+| **H100 NVL** | 16 | 6.44 | **0.58** | **0.090** |
+
+On the H100 a full exact-Hessian Newton iteration is **10× cheaper than
+one L-BFGS iteration**. Mechanism: the L-BFGS zoom line search issues
+many *sequential* latency-bound model evaluations per iteration, while
+Newton's cost concentrates in the Hessian — 89 parallel columns that the
+H100's FP64 units (0.24 s/Hessian, 17× the A100) chew through, plus a
+line search whose 8 candidates batch into one launch. Combined with
+needing ~2× fewer iterations (toy), Newton on H100-class hardware is
+~20× faster per unit progress — the traversal recommendation *inverts*
+between GPU generations. (A100 row to be re-measured with the identical
+microbenchmark for apples-to-apples once the full run frees the card.)
+
+### Gate-free curvature: REFUTED by its own verification (branch `edc-cliff-handling`)
+
+Hypothesis: the EDC gate is -inf-or-zero, so differentiating the ungated
+likelihood gives exact curvature at feasible points, curing the NaN
+Hessians. Implemented as `build_logpost(..., gate="none")`; verified by
+`cliff_hessian_test.py`. **Both claims failed:**
+
+1. Identity check: max |hard − none| = **inf** on feasible chain draws,
+   and the finite Hessians disagree at rel ~1. The EDCs are NOT pure
+   indicators here — they add **continuous penalty terms** (the
+   `edc_eqf` equilibrium factors) inside the feasible set. Dropping the
+   EDC stage drops real curvature.
+2. **0 of 9 NaN Hessians were cured** — the non-finiteness originates in
+   the likelihood/model derivative path itself, not the gate. Leading
+   suspect: the catalogued missing LAI `min_threshold` (GPP/ET floor
+   their operands at 0.1 before the log; LAI does not, and
+   dying-vegetation trajectories reach denormal LAI whose log-derivatives
+   explode). Probe running.
+
+Consequences: `gate="none"` is mislabeled as-is — the correct curvature
+mode must keep the smooth EDC penalties and neutralize only the -inf
+branches; and the cliff story splits in two (soft-vs-hard gating for
+samplers, versus a plain missing threshold for derivatives). The fix
+hypothesis was killed by its own pre-registered test — which is the
+process working, not failing.
+
 ### Full L-BFGS-vs-Newton comparison: TBD (running)
 
 ### Decision: TBD
