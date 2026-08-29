@@ -151,7 +151,35 @@ by 320k evals it is 20× better than the atlas can ever be — straight
 ellipses tile a curve only so well. Division of labor confirmed: atlas
 for the screening answer, MCMC for the publication answer.
 
-### Full comparison: TBD (running)
+### Ridge atlas on the real target (BE-Vie, 89-D, 2026-08-28)
+
+Protocol: referee = the site's stored 64-chain RWM ensemble; anchors = 8
+high-P chain draws spread by farthest-point sampling; one Newton shift +
+capped Hessian per piece; weights ∝ ridge height. 12 min on CPU
+(~8 s/Hessian warm; the same Hessian is 0.24 s on the H100).
+
+| metric (89 parameter marginals vs chain) | single Laplace | atlas (7 pieces) |
+| --- | --- | --- |
+| median KL | 0.406 | **0.238** |
+| worst-parameter KL | 10.72 | **1.02** |
+| params where atlas is better | — | 67/89 |
+| median width ratio (approx/chain) | 1.27 | 1.54 |
+
+Reading: on an easy, mostly-straight-ridge site the median gain is modest
+(1.7×), but the **worst-case marginal improves 10×** — the atlas earns its
+keep exactly on the bent/boundary parameters that break a single Gaussian.
+The honest wrinkle: the atlas is **over-dispersed** (widths 1.54× the
+chain vs 1.27× for single Laplace) — overlapping prior-capped pieces add
+spread-of-means variance. Fine for screening (conservative), wrong to
+quote as posterior widths without repair.
+
+Field notes: the single best chain draw had a **non-finite Hessian**
+(sits against an EDC cliff — more evidence the chain concentrates where
+curvature is undefined), and the Newton shifts moved chain-draw anchors
+essentially nowhere (they are already on the crest; the shift matters for
+off-support anchors like optimizer iterates).
+
+### Full L-BFGS-vs-Newton comparison: TBD (running)
 
 ### Decision: TBD
 
