@@ -179,6 +179,35 @@ curvature is undefined), and the Newton shifts moved chain-draw anchors
 essentially nowhere (they are already on the crest; the shift matters for
 off-support anchors like optimizer iterates).
 
+### Ridge atlas on the hard site (NL-Loo, 89-D): an instructive failure
+
+Same protocol, K=8, run on an idle H100 NVL (3.2 min wall vs 12.2 min on
+CPU; warm 89×89 Hessian 0.24 s vs ~4 s on A100 — the H100's FP64 is
+~17× faster per Hessian). Result: the atlas **degenerated to the single
+Laplace** (median KL 0.577 vs 0.578; weights [1, 0, 0, 0]). Two causes,
+neither visible in the 2-D toy:
+
+1. **Cliff Hessians are pervasive on the hard site.** 4 of 8 high-P chain
+   draws had non-finite Hessians — they sit against hard-EDC boundaries
+   where curvature is undefined (BE-Vie lost only 1 of 8). The chain
+   concentrates exactly where the quadratic model does not exist.
+2. **Ridge-height weighting is wrong in high dimensions.** The usable
+   pieces spanned ~40 log-units of P along the ridge, so exp(P) weights
+   annihilated all but the top piece. In 89-D the typical set lives far
+   below the density peak: pieces low on the ridge still cover real
+   probability mass. Peak height is not mass — the 2-D toy (ridge drop
+   ~2 log-units) could not expose this.
+
+Fix under test (running): evidence weights P + ½ log det Σ with a floor,
+and K=24 anchors to survive the ~50% cliff-casualty rate. Results follow.
+
+The methodological point stands regardless of outcome: the
+toy → easy-site → hard-site ladder has broken a different hidden
+assumption at every rung (iterated shifts collapse the atlas; PSD floors
+create weight-eating blobs; exp(P) weighting fails in high-D; cliff
+Hessians thin the anchors). None of these failures were visible at the
+previous rung.
+
 ### Full L-BFGS-vs-Newton comparison: TBD (running)
 
 ### Decision: TBD
