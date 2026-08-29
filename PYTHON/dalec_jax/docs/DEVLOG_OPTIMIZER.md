@@ -93,9 +93,45 @@ once inside the basin) certifies stationarity exactly where the Laplace
 Hessian is about to be computed — a ~10-iteration polish after L-BFGS,
 not a replacement (arm D).
 
-### Smoke on the real target (4 starts, 15 Newton iters — machinery check): TBD
+### Smoke on the real target (4 starts, 15 Newton iters): three lessons, one bug
 
-### Full comparison: TBD
+Measured 2026-08-28, one A100, NL-Loo, 4 weak screening hits as starts:
+
+| arm | best P (z-space) | wall |
+| --- | --- | --- |
+| L-BFGS 100 iters | −1,937.9 | 1,654 s (16.5 s/iter) |
+| naive damped Newton, 15 iters | −5,296.0 (stalled, λ → 3×10⁶) | 729 s (~48 s/iter after 342 s compile) |
+| Newton polish of L-BFGS endpoints, 5 iters | no improvement | +13 s |
+
+1. **The toy's warning reproduced exactly on the real target**: full-step
+   Levenberg damping stalls — λ escalated six orders of magnitude with
+   nearly every step rejected. The full run now uses the toy-validated
+   backtracking line search along the Newton direction.
+2. **The per-iteration cost surprise (GPU):** a Newton iteration cost only
+   **~3×** an L-BFGS iteration (48 vs 16.5 s at batch 4) — nowhere near
+   the naive 89×. The Hessian's 89 forward-over-reverse columns are
+   parallel work that actually fills the latency-bound GPU, while the
+   gradient leaves it idle. On GPU, Newton's handicap is small; with
+   ~2× fewer iterations needed (toy), it may even be wall-competitive.
+3. A `z2par` type bug crashed the final C-re-score stage (tuple vs
+   ndarray) — fixed; optimization results above were unaffected.
+
+### Side result: combining different-point Hessians (the "ridge atlas")
+
+Toy (2-D banana, ground truth by quadrature): a single-mode Laplace has
+KL(truth‖approx) = 11.1 and misses the arms entirely (y-spread 0.50 vs
+truth 1.92). A mixture of local Gaussians at points along the ridge —
+each Hessian's Gaussian centered at the **once**-Newton-shifted point
+z − H⁻¹g, covariances capped as usual, weighted by ridge height — gives
+**KL 1.39 with three Hessians and 0.55 with five** (a 20× improvement).
+Two hard-won details: the shift must be applied once, not iterated
+(iterating collapses every piece to the global mode), and an indefinite
+off-crest Hessian must be variance-capped, not PSD-floored (the floor
+turns it into a giant flat blob that swallows the mixture weight).
+Candidate upgrade for the screening pipeline at bent-ridge sites like
+NL-Loo; needs a real-target test against the RWM ensemble.
+
+### Full comparison: TBD (running)
 
 ### Decision: TBD
 
