@@ -58,7 +58,42 @@ starts adjacent to hard-EDC cliffs don't diverge.
 
 ## Results
 
-### Smoke (4 starts, 15 Newton iters — machinery check only): TBD
+### Toy pre-test (2026-08-28): the valley must be walked either way
+
+Before spending GPU time on the real target: 50-D generalized Rosenbrock
+(a long, bent, tightly-correlated valley — the NL-Loo ridge in caricature),
+8 shared random starts, float64, CPU. Newton = exact-Hessian damped
+(Levenberg with PD safeguard + backtracking line search).
+
+| method | iterations to f < 1e-6 (median of 8) | cost per iteration |
+| --- | --- | --- |
+| L-BFGS (optax, zoom line search) | **~265** | 1 gradient (+ line search) |
+| exact-Hessian Newton + line search | **~125** | 1 Hessian ≈ D gradients + eigsolve |
+| naive damped Newton (no line search, no PD guard) | stuck at f ≈ 27 after 60 | — |
+
+Three findings:
+
+1. **Curvature only halves the step count; it does not shortcut the
+   valley.** Both methods must traverse the same arc; Newton's quadratic
+   model is only locally valid on a bending ridge, so its precise steps
+   are barely longer than L-BFGS's cheap ones. At DALEC cost ratios
+   (one 89-D Hessian ≈ 89 gradients) Newton's traversal costs ~10–40×
+   more compute than L-BFGS's.
+2. **The pilot's failure mode reproduces as a budget problem**: L-BFGS at
+   200 iterations sits at f ≈ 9 (far from converged); at ~265 it drops to
+   machine precision. Prediction for the real target: arm B (L-BFGS 1000)
+   fixes NL-Loo; arm C (Newton) is not wall-competitive for traversal.
+3. **Naive Levenberg damping without a line search is genuinely bad**
+   (rejected steps discard whole Hessian evaluations) — worth knowing
+   since that is the cheapest Newton one would write first.
+
+Where Newton should still earn a place: the **endgame**. Its quadratic
+convergence (f: 8.9 → 0 between iterations 100 and 200, i.e. machine-zero
+once inside the basin) certifies stationarity exactly where the Laplace
+Hessian is about to be computed — a ~10-iteration polish after L-BFGS,
+not a replacement (arm D).
+
+### Smoke on the real target (4 starts, 15 Newton iters — machinery check): TBD
 
 ### Full comparison: TBD
 
