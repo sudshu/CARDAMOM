@@ -274,11 +274,21 @@ Hessians. Implemented as `build_logpost(..., gate="none")`; verified by
    D_LAI at the 9 NaN anchors is 0.4–1.4 (healthy canopy, no denormals),
    statistically indistinguishable from the 15 finite anchors; foliar C
    and minimum pool values also don't separate the groups. The NaN cause
-   remains open. Next suspect: the known JAX higher-order-derivative
-   leak — the double-`where` idiom protects first derivatives, but
-   second derivatives can still propagate NaN through the outer `where`
-   when the unsafe branch produces inf·0; finding the term needs a
-   per-likelihood-term Hessian bisection (not yet run).
+   remains open ~~. Next suspect: the known JAX higher-order-derivative
+   leak~~ — **localized (debug_nans + HVP direction scan + checkify):**
+   the value AND gradient are finite; the NaN is born at second order,
+   inside the model `lax.scan`, in a `mul` primitive (the classic
+   inf·0 tangent that a double-`where` cannot mask at second order).
+   The 12/89 NaN Hessian-vector directions are one functional cluster —
+   `LCMA, i_labile, Vcmax25, plgr, k_leaf, lambda_max, phi_RL,
+   canopyRdsf, t_lab, rauto_mr_w, i_wood, T_phi` — the **KNORR
+   phenology / labile-growth path**, which contains the model's guarded
+   `pow`/`exp`/`erfc` sites. Fix shape: a tangent-space guard (third
+   `where` or custom_jvp) on the one offending site, which leaves the
+   primal bit-exact and so does not violate the equivalence contract;
+   to land on branch `edc-cliff-handling` after module-level bisection
+   names the exact line, with a before/after test at all 9 bad anchors
+   plus the L1 module regression.
 
 Consequences: `gate="none"` is mislabeled as-is — the correct curvature
 mode must keep the smooth EDC penalties and neutralize only the -inf
