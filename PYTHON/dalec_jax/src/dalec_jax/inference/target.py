@@ -43,14 +43,28 @@ def logit_jacobian(z):
     return jnp.sum(jax.nn.log_sigmoid(z) + jax.nn.log_sigmoid(-z))
 
 
-def build_logpost(cbf_path: str):
+def build_logpost(cbf_path: str, gate: str = "hard"):
     """Return (logpost, cbf): logpost(z) -> z-space log-posterior scalar.
 
     logpost is a pure JAX function of z (shape (89,)); vmap/grad/jit at
     will. It evaluates the full pipeline: 240-step forward model, all 15
-    EDCs (hard gate: -inf outside the feasible set), the 31-term MLF2
-    likelihood, plus the logit Jacobian.
+    EDCs, the 31-term MLF2 likelihood, plus the logit Jacobian.
+
+    gate:
+      "hard" (default) — the C-exact target: -inf outside the EDC-feasible
+        set. The only gate mode for sampling and for anything published.
+      "none" — the likelihood WITHOUT the EDC gate. Inside the feasible
+        set this is numerically IDENTICAL to "hard" (the gate is
+        -inf-or-zero, never a slope), but it is differentiable everywhere:
+        derivatives no longer pass through the -inf `where` branches that
+        make Hessians non-finite at cliff-adjacent points (measured at
+        NL-Loo: 10/24 high-P chain draws). Use for curvature (Laplace /
+        atlas / Newton) and ONLY at points verified feasible by the hard
+        gate; the pushforward density it defines outside the feasible set
+        is not the posterior.
     """
+    if gate not in ("hard", "none"):
+        raise ValueError(f"gate must be 'hard' or 'none', got {gate!r}")
     cbf = data_prep.load_cbf(cbf_path)
     ecfg = {"n_timesteps": cbf.n_timesteps,
             "dint": edcs.compute_dint(cbf.time),
@@ -59,11 +73,23 @@ def build_logpost(cbf_path: str):
     pmin = jnp.asarray(PARMIN)
     lratio = jnp.log(jnp.asarray(PARMAX) / pmin)
 
-    def logpost(z):
-        u = jax.nn.sigmoid(z)
-        p = pmin * jnp.exp(u * lratio)
-        pools, fluxes = run_dalec_1100(p, cbf.met, cbf.LAT, cbf.deltat, VegK)
-        _, _, P = mlf2(cbf, ecfg, p, pools, fluxes)
-        return P + logit_jacobian(z)
+    if gate == "hard":
+        def logpost(z):
+            u = jax.nn.sigmoid(z)
+            p = pmin * jnp.exp(u * lratio)
+            pools, fluxes = run_dalec_1100(p, cbf.met, cbf.LAT,
+                                           cbf.deltat, VegK)
+            _, _, P = mlf2(cbf, ecfg, p, pools, fluxes)
+            return P + logit_jacobian(z)
+    else:
+        from ..likelihood import likelihood
+
+        def logpost(z):
+            u = jax.nn.sigmoid(z)
+            p = pmin * jnp.exp(u * lratio)
+            pools, fluxes = run_dalec_1100(p, cbf.met, cbf.LAT,
+                                           cbf.deltat, VegK)
+            _, Plik = likelihood(cbf, p, pools, fluxes)
+            return Plik + logit_jacobian(z)
 
     return logpost, cbf
