@@ -270,7 +270,15 @@ Hessians. Implemented as `build_logpost(..., gate="none")`; verified by
    suspect: the catalogued missing LAI `min_threshold` (GPP/ET floor
    their operands at 0.1 before the log; LAI does not, and
    dying-vegetation trajectories reach denormal LAI whose log-derivatives
-   explode). Probe running.
+   explode). **Probe result: this hypothesis is refuted too.** Minimum
+   D_LAI at the 9 NaN anchors is 0.4–1.4 (healthy canopy, no denormals),
+   statistically indistinguishable from the 15 finite anchors; foliar C
+   and minimum pool values also don't separate the groups. The NaN cause
+   remains open. Next suspect: the known JAX higher-order-derivative
+   leak — the double-`where` idiom protects first derivatives, but
+   second derivatives can still propagate NaN through the outer `where`
+   when the unsafe branch produces inf·0; finding the term needs a
+   per-likelihood-term Hessian bisection (not yet run).
 
 Consequences: `gate="none"` is mislabeled as-is — the correct curvature
 mode must keep the smooth EDC penalties and neutralize only the -inf
