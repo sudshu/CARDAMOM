@@ -3,6 +3,117 @@
 Newest first. Every agentic session appends: what was attempted, what passed,
 what FAILED (so it is not blindly retried), environment changes.
 
+## 2026-08-29 — Chaos-verdict library: batch-invariant, magnitude-aware
+
+**Library infrastructure only.** This lands `src/dalec_jax/verification.py`,
+the one tracked copy of the L4 verdict, plus its tests. **No tracked runtime
+path consumes it yet.** `runs/*/verify_against_c.py` is untracked, still builds
+its dithers from one batch-indexed stream, and therefore still carries the
+defect below; the reported bug is NOT fixed in the research pipeline until that
+migration lands (plan.md P9). Do not read this entry as "the bug is fixed".
+
+Triggered by `runs/20260829_BRSa1_mechanistic_ensemble/bug_report_vector46/`:
+`laplace_modes[1]` was reported a *genuine* C/JAX discrepancy on two forcing
+paths in a 56-vector batch and *chaos-certified* on one of them when run alone.
+Reproduced exactly. **No model change** — the transcription is faithful; the
+defects are in the verdict harness, and the bug report's own diagnosis was
+wrong.
+
+- What actually diverges is **flux 87 `nonleaf_mortality_factor`, C 0.0 vs
+  JAX 1.0** on both paths — not "2 ULP on a pool at 1.4e9". The stand dies
+  (live carbon 375 → 0.51 gC m⁻² over three timesteps, then 6.7e-17 three
+  steps after that); the C's `C_lab/C_roo/C_woo` arrive at exactly `+0.0` by
+  **cancellation in an absorbing pool update** (`0 − 0·AMF = 0` thereafter)
+  while JAX's land on small non-zero values;
+  `ALLOC_AND_AUTO_RESP_FLUXES.c:65` guards on
+  `POTENTIAL_AUTO_RESP_MAINTENANCE == 0`, so C takes `NMF = 0` and JAX takes
+  `1/exp(≈0) = 1`. Verified by feeding both states through the module directly.
+  **No underflow or denormal is involved**: the C steps `−8.30e-26 → +0.0`
+  directly (gradual underflow would need to cross 2.2e-308) and every JAX
+  value in the chain (−1.52e-43, −4.63e-44, −1.55e-62) is a normal float64.
+  Which of the four pool-update passes produces the exact zero was not
+  isolated and is not asserted here.
+  Pool 11 is **E_LY1, soil thermal energy in J m⁻²**, not carbon — 1.4e9 is
+  an ordinary magnitude for it (`UT_TEMP_2_ENERGY.c`: vhc 1.3e6 J m⁻³K⁻¹ ×
+  depth × T), and on the 2004-07 path it is bit-identical at the onset step.
+  `one_over_deltat = 1/deltat` in both engines.
+- NEW `src/dalec_jax/verification.py`. Element criterion **unchanged**
+  (1e-10 mixed / 1e-12 absolute) and the certification rule **unchanged** (JAX
+  onset ≥ C self-onset − CHAOS_MARGIN); no second route to a certificate is
+  added. What changes is how the rule's inputs are obtained.
+  1. `dither_block()` seeds from a blake2b hash of the vector's own bits. The
+     old `rng.random((n, K, nopars))` indexed one stream by batch position:
+     measured C self-onset **128 at position 0 and −1 at positions 1, 2, 3, 5,
+     10** on `D_noevent_neutral__donor_2006-07` — the reported flip.
+  2. `adjudicate_block()` re-evaluates **every** sample at batch width 1, not
+     just the ones that looked dirty in the block. `jit(vmap(...))` is not
+     bit-identical across widths in either direction (measured: 7 of 17
+     samples move on the 2004-07 path), so canonicalising only the dirty ones
+     would record a block-clean/single-dirty sample as CLEAN — the same
+     position-dependence, mirrored. Both directions are regression-tested.
+  3. `adjudicate()` may escalate K=8 → 64 before reporting a genuine
+     discrepancy. Escalation is **monotone and one-sided** (`c_self` is a min
+     over K onsets, so more dithers can only move DISCREPANT →
+     CHAOS_CERTIFIED) with **no false-positive-rate control**, and it is **not
+     what repairs either motivating path**: 2006-07 already certifies at K=8
+     and 2004-07 never certifies at all.
+  4. `DivergentElement` names the element that failed with |Δ|, the scale the
+     criterion divided by, the relative excess and the ULP distance, NaN
+     ranked last. The old report named a drifting pool instead, which is what
+     sent the bug report down a tolerance-shaped dead end. `as_dict()` is
+     strictly JSON-safe (non-finite floats → `None`).
+  5. `state_plausibility()` is a **separate axis**: live carbon below
+     `LIVE_CARBON_FLOOR = 1e-6` gC m⁻² is recorded as "numerically dead", and
+     never softens the agreement verdict. Both paths sit at 6.7e-17 /
+     8.7e-18 gC m⁻² at the onset.
+- Deterministic dither counts with the shipped seed (20260828), measured to
+  K=512: `donor_2004-07` **0 at every K through 512**, so the C really is
+  1-ULP-insensitive there; `donor_2006-07` **2/8, 3/16, 3/32, 6/64, 7/128,
+  15/256, 28/512** (5.47%), `c_self = 128` at every K.
+- Verdicts after the fix, identical alone and at positions 0/27/55 of a
+  56-vector block on both paths: `donor_2006-07` **chaos-certified**
+  (c_self 128, 2/8 dithers); `donor_2004-07` **discrepant** and **flagged
+  implausible**, so it is rejected for the reason that is true rather than
+  filed as an implementation defect.
+- Ablation over the target at positions 0..3 of a 4-vector block
+  (`agreement` per position; the shipped harness is the first row):
+
+  | seeding | escalation | 2004-07 | 2006-07 |
+  | --- | --- | --- | --- |
+  | position-indexed | none | discr ×5, invariant | **chaos, chaos, discr, discr, discr — NOT invariant** |
+  | per-vector | none | discr ×5, invariant | chaos ×5, invariant |
+  | position-indexed | K→64 | discr ×5, invariant | chaos ×5, invariant |
+  | per-vector | K→64 | discr ×5, invariant | chaos ×5, invariant |
+
+  Per-vector seeding is what makes the verdict well-defined; escalation
+  repairs this particular vector too, but only by accident of it being
+  1-ULP-sensitive at all.
+- **What certification still does not cover**, now documented in
+  `tests/TOLERANCES.md` and the module docstring: the verdict is keyed on the
+  FIRST onset, so an unrelated error planted after a certified onset is
+  invisible (three late-step mutations on the 2006-07 path give a
+  byte-identical verdict). Also recorded there: a dither whose trajectory goes
+  non-finite is a genuine self-divergence under the element criterion and can
+  certify — the rule applied as written, unchanged from `gen_fixtures.py`.
+- NEW `tests/test_verification.py` (21 tests). Oracle-gated set asserts the
+  same verdict alone and at positions 0/27/55 of a **56-vector** block — the
+  original width — on both donor paths, with 55 healthy companions (rows of
+  the tracked `assim_1100.cbr` that run to completion on both paths). The
+  oracle fixture now FAILS on a non-zero oracle exit and skips only when the
+  binary is absent or its shared libraries are unresolvable before execution.
+  The dither test asserts the legacy construction *did* move with position, so
+  it is not vacuous. `tests/data/chaos_D_donor_{2004,2006}-07.cbf.nc` +
+  `chaos_laplace_modes_1.par.txt` committed (110 KB).
+- `tests/test_trajectory.py` and `tools/gen_fixtures.py` now import the shared
+  criterion (three copies had drifted apart). Value-identical over 360
+  adversarial fixture pairs: no golden impact. `gen_fixtures.py` keeps its
+  position-indexed dither draw on purpose — the fixture set is regenerated as
+  a unit — with a comment saying why and that switching it needs `make golden`.
+- NOT in this change, filed separately: `feasible_starts[12]` and `[27]`
+  differ from the C on the **EDC feasibility decision** on all 10 paths. That
+  is a pass/fail disagreement, not a trajectory difference — different
+  signature, different fix. See FINDINGS.md §4.4.
+
 ## 2026-08-24 — Inference fast path + self-containment + README overhaul
 
 - NEW `src/dalec_jax/inference/`: `target.py` (z-space log-posterior,

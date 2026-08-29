@@ -197,6 +197,13 @@ def gen_trajectory_fixtures(rng: np.random.Generator) -> dict:
     # dithered C diverges from the base C under the L4 element criterion.
     # A fixture whose JAX-vs-C divergence onset is >= (this onset - margin)
     # is behaving exactly like a 1-ULP-perturbed C (see TOLERANCES.md).
+    # This draw is position-indexed: one stream over the whole fixture block,
+    # so inserting or removing a fixture reshuffles every later fixture's
+    # dithers. Tolerable HERE because the set is regenerated as a unit and the
+    # certificates are rewritten with it. It is NOT tolerable in the run-time
+    # verifier, where the block composition changes from call to call — that
+    # path must use verification.dither_block, which seeds per vector.
+    # Switching this over invalidates chaos_cert.json and needs `make golden`.
     K = 8
     rng_d = np.random.default_rng(SEED + 1)
     dith = np.repeat(fix[:, None, :], K, axis=1)
@@ -213,23 +220,8 @@ def gen_trajectory_fixtures(rng: np.random.Generator) -> dict:
     dfluxes = np.fromfile(tdir / "_dither_fluxes.bin").reshape(
         fix.shape[0], K, -1, I.NOFLUXES)
 
-    def _fail_rows(c, j):
-        fin = np.isfinite(c)
-        with np.errstate(all="ignore"):
-            rms = np.sqrt(np.nanmean(np.where(fin, c, np.nan) ** 2, axis=0))
-            rms = np.nan_to_num(rms, nan=1.0)
-            mixed = np.abs(j - c) / np.maximum(
-                np.abs(np.where(fin, c, 0.0)), np.maximum(rms, 1e-300))
-        okel = (mixed <= 1e-10) | (np.abs(j - c) <= 1e-12)
-        fail = np.where(fin & np.isfinite(j), ~okel,
-                        ~((~np.isfinite(c)) & (~np.isfinite(j))))
-        return fail.any(axis=1)
-
-    def _tdiv(cp_, jp_, cf_, jf_):
-        # SAME criterion as tests/test_trajectory.py: pools AND fluxes
-        rows = _fail_rows(cp_, jp_) | np.concatenate(
-            [_fail_rows(cf_, jf_), [False]])
-        return int(np.argmax(rows)) if rows.any() else -1
+    # SAME criterion as tests/test_trajectory.py, from the one tracked copy
+    from dalec_jax.verification import divergence_step as _tdiv
 
     onsets = []
     for s in range(fix.shape[0]):

@@ -103,6 +103,28 @@ L4 gate (tests/test_trajectory.py):
 The chaos certificates are regenerated with the goldens
 (trajectories/chaos_cert.json) — same criterion code path as the test.
 
+What the certificate does and does not say (2026-08-29, `verification.py`).
+The certification rule above is the only route to a certificate; there is no
+magnitude/envelope alternative. Three properties of it are worth stating
+explicitly, because none of them is obvious from the one-line rule:
+
+- **It is a FIRST-ONSET verdict.** Everything downstream of the first
+  divergence step is unexamined once a sample certifies. Late-step mutations
+  planted after a certified onset (+10% C_som, ×2 E_LY1, E_LY1←0 from step 131
+  on a 139-step certified trajectory) produce a byte-identical verdict. A
+  certificate is evidence about one onset, not a whole-trajectory guarantee.
+- **A non-finite dither response is a real self-divergence.** A dither whose
+  trajectory goes non-finite where the base C is finite fails the element
+  criterion at that step, so it counts as a C self-divergence and can certify.
+  That is the criterion applied as written — not a fabricated envelope — but it
+  means certificates on near-death vectors rest on the C's own instability.
+- **Raising K is monotone and one-sided.** `verification.adjudicate` may
+  escalate K=8 → 64 before reporting a genuine discrepancy. `c_self` is a
+  minimum over K onsets, so more dithers can only move DISCREPANT →
+  CHAOS-CERTIFIED, never the reverse, and nothing controls the false-positive
+  rate of that move. It is a deeper measurement of the same rule, not a weaker
+  rule. `gen_fixtures.py` still certifies at a flat K=8.
+
 Notes.
 - Equivalence tests are CPU-only by policy (GPU runs are for performance,
   not reference comparison); conftest sets JAX_PLATFORMS=cpu.

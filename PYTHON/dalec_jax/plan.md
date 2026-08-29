@@ -103,3 +103,34 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (test gate green) �
 - [x] Figure pack figures/jax_equivalence/ + RESULTS_c_vs_jax.md
 - [x] README final; PR_DRAFT.md written — UPSTREAM PR NOT OPENED (needs
       owner approval; outward-facing action)
+
+## P9 — verdict harness hardening (LIBRARY ONLY) — DONE 2026-08-29
+- [x] `src/dalec_jax/verification.py`: one tracked copy of the L4 verdict.
+      Element criterion AND certification rule unchanged. Per-vector dither
+      seeding (was indexed by batch position), unconditional batch-width-1
+      re-evaluation of every sample, K=8→64 escalation (monotone, one-sided,
+      no FPR control) before any genuine verdict, element-named magnitude/ULP
+      divergence report with NaN ranked last and JSON-safe serialisation, and
+      physical plausibility as a SEPARATE axis that never softens the verdict.
+- [x] `tests/test_verification.py` (21): batch-position invariance of the
+      dithers (with a non-vacuity check against the legacy construction),
+      escalation, report naming, plausibility separation, JSON safety, and the
+      oracle-gated same-verdict-alone-vs-at-positions-0/27/55-of-56 pair on
+      both bug-report donor paths, using healthy companions.
+- [x] `test_trajectory.py` + `gen_fixtures.py` import the shared criterion
+      (value-identical; no golden impact).
+- [x] `tests/TOLERANCES.md` records what a certificate does NOT say:
+      first-onset only, non-finite dithers are real self-divergences, K
+      escalation is one-sided.
+- [ ] **THE REPORTED DEFECT IS STILL LIVE.** `runs/*/verify_against_c.py` is
+      untracked, still builds `rng.random((n, K, nopars))` over the unclean
+      subset, and does not import `dalec_jax.verification`. Migrating its
+      `compare_block`/`chaos_onsets` onto `verification.adjudicate_block` is
+      the step that actually fixes the pipeline; it cannot be done from this
+      worktree. Batch the dithers into one oracle launch per block while doing
+      it — `adjudicate` currently costs up to 2 subprocess launches per
+      non-clean sample where the code it replaces used 1 per block.
+- [ ] `gen_fixtures.py` dither draw is still position-indexed (deliberate,
+      documented in-file); switching it invalidates `chaos_cert.json`.
+- [!] `feasible_starts[12]`/`[27]` EDC feasibility DECISION mismatch on all
+      10 paths — separate issue, see FINDINGS.md §4.4. Not touched here.
