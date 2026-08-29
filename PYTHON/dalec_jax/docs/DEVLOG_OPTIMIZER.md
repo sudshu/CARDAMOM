@@ -198,8 +198,30 @@ neither visible in the 2-D toy:
    probability mass. Peak height is not mass — the 2-D toy (ridge drop
    ~2 log-units) could not expose this.
 
-Fix under test (running): evidence weights P + ½ log det Σ with a floor,
-and K=24 anchors to survive the ~50% cliff-casualty rate. Results follow.
+Fixes tested (K=24 anchors → 14 usable pieces after cliff casualties;
+4.5 min per run on the H100):
+
+| NL-Loo, 89 marginals vs chain | median KL | worst KL | atlas better | width ratio |
+| --- | --- | --- | --- | --- |
+| single Laplace | 0.57 | 22.0 | — | 1.12 |
+| atlas, exp(P) weights (K=8) | 0.58 | 22.3 | 44/89 | 1.13 |
+| atlas, evidence weights + floor | 0.43 | 11.7 | 76/89 | 1.17 |
+| **atlas, uniform weights** | **0.29** | **4.4** | 70/89 | 1.59 |
+
+**Uniform weighting wins** — median KL 2× better than the single Laplace
+and the worst marginal 5× better. Every density-derived weighting
+(exp(P), evidence P + ½logdet) collapses onto the top piece, because the
+ridge's ~40-log-unit height drop dwarfs any logdet correction; in 89-D
+what matters is *covering the typical set*, i.e. tiling the ridge by
+arc length, not by height. Even the evidence-weight run's improvement
+came entirely from its 0.25% floor pieces — sub-percent mass in the
+right place repairs KL's fatal "chain mass where approx has none" error.
+
+The price is over-dispersion (widths 1.59× the chain): uniform tiling
+buys shape at the cost of spread. Screening verdict: use uniform-weight
+atlas for shape/coverage questions; use the single capped Laplace (1.12×)
+when only per-parameter widths are needed; the chain remains the referee
+for both.
 
 The methodological point stands regardless of outcome: the
 toy → easy-site → hard-site ladder has broken a different hidden
