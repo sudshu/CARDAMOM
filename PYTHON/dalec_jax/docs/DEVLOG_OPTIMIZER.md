@@ -297,7 +297,41 @@ samplers, versus a plain missing threshold for derivatives). The fix
 hypothesis was killed by its own pre-registered test — which is the
 process working, not failing.
 
-### Full L-BFGS-vs-Newton comparison: TBD (running)
+### Full L-BFGS-vs-Newton comparison (NL-Loo, 16 shared screening-hit starts, one A100)
+
+| arm | best P (z-space) | best P (C re-score) | wall | evals |
+| --- | --- | --- | --- | --- |
+| chain best (reference) | **−233.7** | **−58.3** | — | — |
+| A: L-BFGS 200 | −402.2 | −217.8 | 2,039 s | 200 g |
+| B: L-BFGS 1000 | −402.2 (identical to A) | −217.8 | 7,851 s | 1000 g |
+| C: Newton + line search, 60 iters | −2,928.1 | −2,752.6 | 726 s | 60 H+g |
+| D: A + 15-iter Newton polish | −402.2 (no gain) | −217.8 | 2,052 s | 200g+15H |
+
+Three verdicts, one of which kills our own earlier prediction:
+
+1. **"It's an iteration-budget problem" — REFUTED.** Arm B ran 5× the
+   budget for 2.2 h and finished bit-identical to arm A. L-BFGS is not
+   stalled short of the top; it is converged at stationary points ~184
+   C-log-units below the chain's best draw. (The toy predicted budget
+   would fix it; the real ridge disagrees.)
+2. **Arm C is confounded by the KNORR second-order NaN leak** (see
+   above): λ pinned at its 10⁸ cap from iteration ~10 — the Newton
+   direction is being poisoned exactly as the NaN-Hessian diagnosis
+   predicts. Newton on the real target cannot be judged until the
+   tangent-space fix lands; re-run scheduled after that.
+3. **Nothing beats the chain — decision-matrix outcome 3.** On NL-Loo
+   the optimizer arms all plateau far below what stochastic diffusion
+   along the flat, curved, cliff-bounded ridge finds. Where a ridge is
+   effectively flat along its length, gradient ascent has no signal to
+   follow lengthwise while the chain diffuses freely; "the MAP" is
+   numerically ill-defined at this site and the sampler's mass answer is
+   the only meaningful one. Practical rule adopted: report
+   max(mode, chain-best) as the MAP candidate and flag any site where
+   the chain wins — that flag is itself the ridge-flatness diagnostic.
+
+Wall-clock footnote: the entire four-arm experiment (3.5 h) cost ~7× one
+pilot site posterior; the H100 microbenchmark suggests the same suite
+would run ~10× faster there once the Hessian fix makes arm C meaningful.
 
 ### Decision: TBD
 
