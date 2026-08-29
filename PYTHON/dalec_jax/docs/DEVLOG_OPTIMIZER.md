@@ -131,6 +131,26 @@ turns it into a giant flat blob that swallows the mixture weight).
 Candidate upgrade for the screening pipeline at bent-ridge sites like
 NL-Loo; needs a real-target test against the RWM ensemble.
 
+**And the exchange rate vs Laplace-guided RWM, same toy** (64 chains,
+capped-Laplace proposal, histogram density, KL(truth‖approx)):
+
+| approximation | model evaluations | KL |
+| --- | --- | --- |
+| single capped Laplace | ~100 (mode find + 2 Hessians) | 11.12 |
+| ridge atlas, 5 pieces | ~1–2k grad-equivalents (10 Hessians) | **0.55** |
+| RWM, 64×200 | 12,800 | 44.3 (worse than Laplace — chains haven't spread) |
+| RWM, 64×1,000 | 64,000 | 9.48 (≈ single Laplace) |
+| RWM, 64×5,000 | 320,000 | 0.031 |
+| RWM, 64×20,000 | 1,280,000 | 0.008 |
+
+Reading: the chain needs roughly **100–150k evaluations to match what the
+atlas gets from ~10 Hessians** (a ~50–100× compute advantage at screening
+budgets), and early-budget MCMC is *worse than a single Laplace* because
+unspread chains leave the arms empty. But only the chain keeps improving:
+by 320k evals it is 20× better than the atlas can ever be — straight
+ellipses tile a curve only so well. Division of labor confirmed: atlas
+for the screening answer, MCMC for the publication answer.
+
 ### Full comparison: TBD (running)
 
 ### Decision: TBD
