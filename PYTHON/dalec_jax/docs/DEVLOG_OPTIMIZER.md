@@ -644,9 +644,22 @@ smallest mode. The mechanism is correct.
 | params with KL > 1 | 9/89 | 50/89 |
 | width ratio (median / 10th) | 0.91 / 0.57 | 0.64 / 0.30 |
 
-Cause is unambiguous from the built-in diagnostics: **one cell of 81 absorbs
+The proximate cause is visible in the built-in diagnostics: **one cell of 81 absorbs
 98.4% of the estimated mass** (mass ESS 1.0, weight ESS 0.012), and 20 cells
 received no estimate at all and were implicitly zeroed.
+
+**Split-half stability check: the collapse is estimator variance, not a
+property of the cells.** Splitting the pooled draws in half and estimating
+each cell's log Z independently from each half (40 cells estimated in both,
+1,119 s) gives a **median half-to-half difference of 40 log-units** (90th
+percentile 8.7e4, max 7.8e5). Each half is separately degenerate — top-1 mass
+0.999 and 1.000, mass ESS 1.0 in both — but they **disagree about which cell
+holds the mass** (argmax cell 9 vs cell 5). Two independent samples of the
+same estimator putting ~all mass on different cells is the signature of an
+estimator whose variance has exploded, not of a genuinely dominant cell. So
+the atlas is not demonstrably mis-covering the ridge; the bridge estimator is
+simply unusable at this dimension, and the 98.4% figure above should be read
+as noise rather than as a measurement.
 
 **This is the third independent failure of density-derived chart weights in
 89-D** — after exp(P) weights and Laplace evidence weights — and the most
@@ -659,8 +672,6 @@ estimator has yet pinned down.
 ### Still open
 
 - Localize the second overflow site (anchor 79) and re-measure.
-- Bridge-evidence stability check (split-half per cell) to settle whether
-  the 98.4% concentration is real or estimator variance — running.
 - A mixing mechanism that actually moves between charts (parallel tempering
   across the atlas), since neither more walkers, longer chains, nor
   post-hoc reweighting fixed the trapped-chain bias.
