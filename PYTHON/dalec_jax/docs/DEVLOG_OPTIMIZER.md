@@ -1,7 +1,19 @@
 # Devlog: is the "MAP" actually the MAP? L-BFGS vs true Newton
 
-A running record of an open investigation. Status: **smoke test running**.
-Numbers on this page are measured; anything not yet measured is marked TBD.
+A running record of an open investigation. Numbers on this page are
+measured; anything not yet measured is marked TBD.
+
+Status (2026-08-31): the original question is answered, and the answer
+changed twice. Reading order matters — the four-arm comparison concluded
+that "the MAP is ill-defined at NL-Loo", and the production-ADEMCMC control
+run at the bottom of the page **overturns that conclusion**. Two other
+claims made along the way were refuted by their own verification (gate-free
+curvature; a buffered-output timing artifact). Corrections are kept in place
+rather than edited away, because the sequence is the point.
+
+Contents: the defect → toy pre-tests → ridge atlas → H100 inversion →
+refuted hypotheses → four-arm comparison → **the NaN-Hessian fix** →
+**SARLA** → **the ADEMCMC control that revised the story**.
 
 ## The defect that started this (2026-08-28)
 
@@ -333,21 +345,227 @@ Wall-clock footnote: the entire four-arm experiment (3.5 h) cost ~7× one
 pilot site posterior; the H100 microbenchmark suggests the same suite
 would run ~10× faster there once the Hessian fix makes arm C meaningful.
 
-### Decision: TBD
+### Decision: settled by the production-ADEMCMC control (see below)
 
-Possible outcomes and what each would mean for the pipeline:
+Outcome 3 held *among the JAX arms* (nothing beat the chain). But the
+control run added later overturns the interpretation we drew from it: the
+ridge is not intrinsically pathological — our methods were simply too
+cheap. See "The control we should have run first".
 
-- **B ≈ C ≫ A**: iteration budget, not method — raise the L-BFGS budget.
-- **C ≫ B**: curvature staleness is real — adopt Newton polish (arm D)
-  as a standard stage between L-BFGS and the Hessian/Laplace step.
-- **Nothing beats the chain**: the ridge is effectively flat along its
-  length; "the MAP" is numerically ill-defined here and only the sampler's
-  mass answer is meaningful.
+## The KNORR NaN Hessians: located, fixed, and not finished (2026-08-30)
+
+The leak that confounded arm C above is **not in KNORR phenology at all**.
+It is in the gradient-hardened expression
+
+```python
+1 / jnp.exp(jnp.minimum(x, LOG_DBL_MAX))
+```
+
+at three sites: the ALLOC growth factor and non-leaf mortality factor
+(`modules/alloc_and_auto_resp.py`) and the leaf mortality factor
+(`modules/liu_an_et.py`). The 12 flagged "KNORR/labile" parameter
+directions were downstream victims, not the cause.
+
+**Mechanism.** For `x` just below the cutoff (measured: `x_gf = 707.7897`
+at timestep 86, NL-Loo), `exp(x)` is finite-but-huge. The forward-mode JVP
+of `exp` forms `exp(x)·dx`, which overflows to `inf` for any tangent of
+ordinary size; the following `div` then yields `inf/inf = NaN`. Reverse
+mode never forms that product — its cotangent chain divides by
+`exp(x)² = inf`, underflowing benignly to 0. **That asymmetry is exactly
+why `jax.grad` stayed finite while every `jacfwd(grad)` and HVP went NaN**,
+and why the defect survived so long: nothing in the gradient-based pipeline
+could see it.
+
+**The non-obvious part: `custom_jvp` does not fix this inside `lax.scan`.**
+Forward-over-reverse differentiates the scan body *after* linearization has
+decomposed the custom call, so the raw body is re-differentiated and the
+overflow returns (verified with a single-step scan micro-repro: eager HVPs
+fine, scan HVPs NaN). The body itself must be safe at every derivative
+order. The landed guard is a straight-through idiom whose value path is the
+original expression and whose derivative path only ever touches the bounded
+`exp(-m)`:
+
+```python
+m = jnp.minimum(x, LOG_DBL_MAX)
+w_stable, w_exact = jnp.exp(-m), 1 / jnp.exp(m)
+sg = jax.lax.stop_gradient
+return sg(w_exact) + jnp.where(jnp.isfinite(w_stable),
+                               w_stable - sg(w_stable), 0.0)
+```
+
+### Verification (81 SARLA chart centers × 12 implicated directions = 972 HVPs, equivalence-grade flags)
+
+| check | before | after |
+| --- | --- | --- |
+| NaN HVP directions (of 972) | 163 | **12** |
+| anchors with ≥1 NaN direction (of 81) | 21 | **1** |
+| whole-model primal bit-identical | — | 80 / 81 |
+| guard in isolation (400,013-point sweep) | — | **0 differing bits** |
+| `pytest tests` | — | 44 passed, 1 skipped |
+
+**Two limits, stated rather than buried** (both recorded in the
+`ad_guards.py` docstring and the commit message, `edc-cliff-handling`
+`cc52936e`):
+
+1. **Incomplete.** Anchor 79 retains all 12 NaN directions, *unchanged by
+   the guard* — at least one further overflow site exists elsewhere in the
+   step and is not yet localized.
+2. **Not globally bit-preserving.** One anchor's whole-model log-posterior
+   shifts by 5.7e-14 (~1–2 ulp; ~10⁵ inside the 1e-10 trajectory bar).
+   Since the guard is exact in isolation, this comes from XLA fusing the
+   enlarged graph differently, not from the arithmetic. Under default flags
+   (algsimp on) 4/77 anchors shift by the same magnitude.
+
+A third observation, incidental but worth recording: **with `algsimp`
+disabled all 81 anchors are feasible; with it enabled only 77 are.** Four
+anchors sit close enough to an EDC cliff that 1-ulp rounding flips them
+between finite and −inf. Any exactness claim on this target must pin the
+XLA flags.
+
+---
+
+## SARLA: an audited, rank-adaptive Laplace atlas (2026-08-30)
+
+Full specification and results:
+[SARLA design note](https://app.notion.com/p/3cd788b60530817a904ff70d7f6ef58b).
+Implementation lives in the research repo (`scripts/sarla*.py`).
+
+The idea: build a Laplace atlas, then use short **frozen-proposal audit
+epochs** to find where the atlas is wrong, project each discrepancy onto the
+near-optimal set (tangent-preserving normal-space re-optimization), diagnose
+*why* it failed (missing extent / bend / separate basin / rank change), and
+perform atlas surgery — repeating until two consecutive audits come back
+clean, then freezing for exact Metropolis–Hastings.
+
+### Where it wins and fails (6 targets, matched eval budgets)
+
+Compared against single Laplace, a static atlas, **AIMM-lite** (same audit,
+but components placed *at* the flagged point — the established adaptive
+mixture recipe, and the key ablation), and tuned RWM. JS = Jensen–Shannon
+divergence of produced samples vs grid truth.
+
+| target | SARLA (KL / acc / JS) | AIMM-lite | RWM (JS) | verdict |
+| --- | --- | --- | --- | --- |
+| near-Gaussian | 0.015 / 0.96 / 0.009 | identical | 0.028 | control: freezes at K=1, no wasted surgery |
+| curved ridge | 0.78 / 0.26 / 0.017 (K=10) | 1.02 / 0.20 / 0.031 (K=17) | 0.015 | win: better fit per chart |
+| 3 modes, 1 seeded | **0.094 / 0.76 / 0.006** | 0.94 / 0.34 / 0.011 | 0.219 | flagship win; RWM never crosses |
+| branching valley | 0.96 / 0.33 / 0.022 (K=4) | 1.42 / 0.18 / 0.023 (K=15) | 0.014 | win: diagnoses **rank-change** at the bifurcation |
+| Neal's funnel | 0.87 / 0.36 / 0.084 (K=1) | identical | **0.046** | **fail**: rank varies continuously; audit never fires |
+| Cauchy tails | 0.85 / 0.26 / 0.040 (K=16) | 0.87 / 0.20 / 0.031 | **0.015** | **fail**: Gaussians cannot tile power-law tails |
+
+Three implementation lessons, each found by a failing test rather than by
+reasoning: the defensive component must be **prior-wide**, not atlas-wide
+(it has to reach mass the atlas knows nothing about); the normal corrector
+must start **at the flagged point's own offset** (starting at the chart
+centre collapses every diagnosis back onto the known atlas); and freezing
+requires **two consecutive clean audits** (a single clean audit was followed
+by two real defects in the ridge test).
+
+### Dimension scaling, and the honest limit
+
+Embedding the banana in nuisance dimensions: at d=8 the nuisance eigenvalues
+sit inside the spectral gap, the ridge is silently misclassified as rank-0,
+and **no repairs land at all** (K=1, ESS 0.002). Loosening the gap threshold
+from 10 to 5 fixes d=8 completely — the rank rule works but is brittle in
+the 4–6 ratio range, which is precisely the "stability guarantees" gap the
+design note lists as a prerequisite for publication. Even with rank fixed,
+independence-MH acceptance decays 0.21 (d=8) → 0.10 (d=16) → 0.06 (d=32).
+
+### On the real 89-D target (NL-Loo)
+
+The atlas machinery worked: 17 seeds → **81 charts in 537 s** on one A100,
+diagnoses overwhelmingly *rank-change* (tangent count varies 28–51 along the
+ridge — correctly sensed), NaN-Hessian charts degrading gracefully to
+prior-width. But **global independence sampling collapsed**: audit ESS
+pinned at 0.000, production IMH acceptance **0.002**. No tractable mixture
+is globally accurate enough in 89-D for independence proposals.
+
+Spending the same atlas *locally* is what worked. Launching 64 chains from
+the audit-repaired chart centres with chart-shaped local steps
+(acceptance-tuned; the textbook 2.38/√d collapsed again, as it did in the
+pilot) reached **P = −200.7 z-space, C-oracle verified −34.24** — a
+33-log-unit improvement on the previous project best, in **~12 min of GPU
+time** (537 s atlas + 179 s sampling). Atlas jumps in 89-D are real but
+marginal: 0.08% acceptance, 1.3 vs 1.0 regions visited per chain.
+
+**Conclusion:** SARLA's audit-and-surgery loop is a validated *atlas builder
+and geometry certifier*; its independence-MH stage is a low-to-mid-
+dimensional tool. In high dimension, spend the certified atlas locally —
+which is the Laplace-guided RWM we already had. Same object, different
+resolution.
+
+---
+
+## The control we should have run first: production ADEMCMC on NL-Loo (2026-08-31)
+
+Every claim above about NL-Loo being pathological rested on comparisons
+among *our* methods. So we ran the production C sampler on the same site:
+**64 independent ADEMCMC chains** (unique seeds, 500,000 iterations,
+1,000 stored samples each), niced, on the 256-core node.
+
+| | value |
+| --- | --- |
+| feasible-start search | median **65 min** (min 59, max 2.2 h) |
+| main MCMC | median **31.6 h** (min 27.3, max 32.7) |
+| best P (C oracle, 200 subsampled draws/chain) | **−25.56** (median per chain −28.71, worst −31.67) |
+| Gelman–Rubin R̂ | **< 1.1 for all 89 parameters** (max 1.07) |
+
+**This overturns two claims made earlier on this page.**
+
+1. **"The MAP is numerically ill-defined at NL-Loo / the ridge defeats
+   samplers" — WRONG, or at least far too strong.** ADEMCMC converges here:
+   64 independent chains agree (R̂ < 1.1 on every parameter) and reach a
+   consistently better region. *Every single chain individually beat our
+   best JAX result.* The ridge is hard for cheap methods, not intrinsically
+   pathological. The "report max(mode, chain-best) and flag it" rule still
+   stands as a diagnostic, but the flag means "your sampler was too cheap",
+   not "no MAP exists".
+2. **A reported timing was a measurement artifact.** During the run this
+   page's author reported that 58 of 64 chains had not cleared the
+   feasible-start search after 32 h. That was **wrong**: C stdout is
+   block-buffered, so progress lines only appeared when buffers flushed and
+   the grep undercounted. Real median search time was 65 min — *faster* than
+   the demo site's 2.2 h. Recorded here because the false version was the
+   more interesting story, which is exactly when a number deserves a second
+   look.
+
+### Where that leaves the speed comparison
+
+| method | wall clock (NL-Loo) | best P (C) | product |
+| --- | --- | --- | --- |
+| SARLA atlas + guided kernel | **~12 min** (1 A100) | −34.24 | screening posterior |
+| guided RWM, 6,400 draws | ~15 min | −58.30 | screening posterior |
+| L-BFGS ×16 / Newton | 34 min / 12 min | −217.8 / −2752.6 | point estimates |
+| **ADEMCMC, 64 chains** | **32.7 h/chain**, all concurrent | **−25.56** | converged posterior, R̂ < 1.1 |
+
+The JAX path is ~150× faster to an answer and lands ~9 C-log-units short of
+where every production chain ends up. That is the screening-grade versus
+publication-grade distinction, made concrete on the hardest site we have,
+and it is the strongest argument yet for the hybrid we have been proposing
+to the CARDAMOM team: **use the JAX modes and Laplace covariance to seed and
+shape ADEMCMC rather than to replace it.** ADEMCMC spends ~10⁸ evaluations
+per site, ~65 min of it before sampling even starts — both are costs the
+fast path can donate away without changing what the sampler produces.
+
+### Still open
+
+- Localize the second overflow site (anchor 79) and re-measure.
+- Re-run Newton arm C now that curvature is usable — H100 preferred
+  (10× cheaper Newton steps there).
+- Seeded-ADEMCMC experiment: JAX modes + Laplace covariance as the C
+  sampler's starting state and proposal, measuring how much of the 32.7 h
+  disappears with the product held fixed.
+
+---
 
 ## Context
 
 - The pilot pipeline and its measured numbers: [FINDINGS.md](../FINDINGS.md)
 - Concept figures: [CONCEPTS.md](CONCEPTS.md)
+- SARLA design note: https://app.notion.com/p/3cd788b60530817a904ff70d7f6ef58b
 - This page exists because the defect was caught by a reader's question
   about a figure — the fourth time in this project that adversarial
-  attention to a surprising detail overturned a headline number.
+  attention to a surprising detail overturned a headline number. The
+  ADEMCMC control at the top of this section is the fifth: it was run only
+  because a reader asked "how well does ADEMCMC do on NL-Loo?", and it
+  reversed a conclusion this page had already drawn.
