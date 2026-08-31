@@ -9,6 +9,7 @@ selected values.
 import jax.numpy as jnp
 
 from ..constants import DGCM_TK0C
+from .ad_guards import inv_exp_clamped
 
 
 def liu_an_et(SRAD, VPD, TEMP, vcmax25, co2, beta_factor, g1, LAI, ga, VegK,
@@ -67,11 +68,14 @@ def liu_an_et(SRAD, VPD, TEMP, vcmax25, co2, beta_factor, g1, LAI, ga, VegK,
     LOG_DBL_MAX = 709.782712893384
     x_lmf = NSC / (jnp.where(Rd_daily_potential == 0, 1.0,
                              Rd_daily_potential) * deltat)
+    # SECOND-ORDER LEAK GUARD: inv_exp_clamped is bit-identical to
+    # 1/exp(min(x, LOG_DBL_MAX)); its JVP -w*dx keeps forward tangents
+    # finite for x just below the cutoff (exp(x)*dx would overflow and
+    # give inf/inf = NaN in jvp/HVP; see ad_guards.py).
     LEAF_MORTALITY_FACTOR = jnp.where(
         Rd_daily_potential == 0,
         0.0,
-        jnp.where(x_lmf > LOG_DBL_MAX, 0.0,
-                  1 / jnp.exp(jnp.minimum(x_lmf, LOG_DBL_MAX))))
+        jnp.where(x_lmf > LOG_DBL_MAX, 0.0, inv_exp_clamped(x_lmf)))
     OUT_Rd = Rd_daily_potential * (1 - LEAF_MORTALITY_FACTOR)
     Rd = Rd * (1 - LEAF_MORTALITY_FACTOR)
 
