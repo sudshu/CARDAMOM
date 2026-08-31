@@ -548,6 +548,47 @@ indices (`dist_lab`=7, `dist_roo`=11, where the C truth is 89–92 and slots
 at all; it also uses non-C drainage, non-C 10⁻⁴ clamps, and has no EDCs —
 it predates this work and should carry a deprecation note.
 
+### 4.3 Hard `== 0` guards on pools that have collapsed to rounding noise
+
+`ALLOC_AND_AUTO_RESP_FLUXES.c:65` selects the non-leaf mortality factor with
+`if (POTENTIAL_AUTO_RESP_MAINTENANCE == 0)`. In a stand that has died, the live
+carbon pools decay through ~17 orders of magnitude of rounding noise; whether
+they arrive at exactly `+0.0` or at a small non-zero value is not a property of
+the model. Once a pool reaches `+0.0` the C is stuck there (`0 − 0·AMF = 0`),
+so the two engines end up in *different absorbing states* and
+`NONLEAF_MORTALITY_FACTOR` reads 0 in one and 1 in the other — a full-scale
+difference in a bounded variable, from a difference that was never physically
+meaningful.
+
+The zero is reached by **exact cancellation in the pool update**, not by
+underflow: the C steps `−8.30e-26 → +0.0` in one timestep (gradual underflow
+would require crossing 2.2e-308), and every value on the JAX side of the same
+chain (−1.52e-43, −4.63e-44, −1.55e-62) is a normal float64. Which of the four
+pool-update passes produces the exact zero has not been isolated. Anyone
+chasing this should not go looking at flush-to-zero or denormal handling.
+
+Reproduced on `laplace_modes[1]` of the BR-Sa1 mechanistic ensemble
+(`tests/data/chaos_*`): live carbon 375 → 0.51 gC m⁻² over three timesteps,
+then 6.7e-17 three steps after that, at the divergence onset. This is not a
+transcription defect and the port reproduces the guard faithfully; it is a
+place where the *model* has no defined answer. The verifier now says so
+explicitly rather than recording it as a C/JAX discrepancy — see
+`verification.state_plausibility` and the 2026-08-29 CHANGELOG entry. A
+scientific fix (clamping dead pools to zero, or guarding on a physical
+threshold instead of on `== 0`) is out of scope under the bug-compatibility
+policy and would need owner approval.
+
+### 4.4 Open: EDC feasibility DECISION mismatch on two vectors
+
+**Filed separately; not the chaos-verifier issue and must not be conflated
+with it.** `feasible_starts[12]` and `feasible_starts[27]` of the same
+ensemble disagree with the C on the **EDC pass/fail decision** — a boolean
+disagreement, on **all 10** forcing paths, with no dependence on batch width.
+The locked contract makes EDC decisions and −inf sentinels *exact*, so this
+is a hard failure with a different signature and a different root cause from
+the trajectory-verdict work above, and it is not addressed by
+`verification.py`. Status: unreproduced/undiagnosed here.
+
 ---
 
 ## 5. The benchmarks in full

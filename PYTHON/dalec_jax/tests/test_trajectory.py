@@ -28,34 +28,11 @@ import pytest
 
 import dalec_jax  # noqa: F401
 from dalec_jax import oracle_io
+from dalec_jax.verification import (  # noqa: F401
+    ABS_TOL, CHAOS_MARGIN, REL_TOL, break_step as _break_step,
+    divergence_step as _tdiv)
 
-REL_TOL = 1e-10
-ABS_TOL = 1e-12
-MARGIN = 10
-
-
-def _element_fail(c, j):
-    fin = np.isfinite(c)
-    with np.errstate(all="ignore"):
-        rms = np.sqrt(np.nanmean(np.where(fin, c, np.nan) ** 2, axis=0))
-        rms = np.nan_to_num(rms, nan=1.0)
-        mixed = np.abs(j - c) / np.maximum(np.abs(np.where(fin, c, 0.0)),
-                                           np.maximum(rms, 1e-300))
-    ok = (mixed <= REL_TOL) | (np.abs(j - c) <= ABS_TOL)
-    return np.where(fin & np.isfinite(j), ~ok,
-                    ~((~np.isfinite(c)) & (~np.isfinite(j))))
-
-
-def _tdiv(cp, jp, cf, jf):
-    fp = _element_fail(cp, jp).any(axis=1)
-    ff = _element_fail(cf, jf).any(axis=1)
-    rows = fp | np.concatenate([ff, [False]])
-    return int(np.argmax(rows)) if rows.any() else -1
-
-
-def _break_step(pools):
-    zero = np.all(pools == 0, axis=-1)
-    return int(np.argmax(zero)) if zero.any() else -1
+MARGIN = CHAOS_MARGIN
 
 
 @pytest.fixture(scope="module")
