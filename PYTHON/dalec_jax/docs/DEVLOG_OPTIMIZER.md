@@ -581,9 +581,89 @@ between-chart weights (thermodynamic integration or bridge sampling per
 chart, then reweight pooled local draws) instead of expecting a local kernel
 to sample them.
 
+### Does the difference matter scientifically? (2026-08-31)
+
+KL is not a science unit, so both posteriors (500 draws each) were pushed
+through the C oracle and compared on the quantities CARDAMOM papers report.
+"sd" = shift in units of the ADEMCMC posterior standard deviation.
+
+| quantity | ADEMCMC median [5–95%] | fast-path median [5–95%] | shift | CI width |
+| --- | --- | --- | --- | --- |
+| **NBE** | −1.05 [−1.26, −0.77] | −1.05 [−1.25, −0.82] | **−0.1% (0.0 sd)** | 0.87× |
+| GPP | 3.41 [2.91, 4.02] | 3.20 [2.72, 3.83] | −6.4% (−0.6 sd) | 0.99× |
+| LAI | 2.08 [1.55, 2.69] | 2.11 [1.66, 2.62] | +1.6% (0.1 sd) | 0.84× |
+| wood residence time* | 15.5 yr | 14.9 yr | −3.9% (−0.3 sd) | 0.96× |
+| CUE | 0.613 | 0.659 | +7.5% (0.4 sd) | 1.19× |
+| ET | 0.156 | 0.209 | +34% (0.4 sd) | 1.14× |
+| **SOM residence time** | **689 yr [99, 8750]** | **314 yr [63, 1590]** | **−54%** | **0.18×** |
+| CH₄ fraction | 6.1e−4 [~0, 0.38] | 5.0e−3 [~0, 0.53] | +720% (0.0 sd) | 1.40× |
+
+\* wood row uses a crude allocation proxy (0.3·GPP), not the model's wood
+turnover flux — indicative only. The SOM row uses actual Rh fluxes.
+
+**Two-sided answer.** For well-constrained carbon fluxes the fast path is
+scientifically equivalent: NBE — the headline number of a carbon-balance
+study — agrees to 0.1%, and GPP/LAI/CUE agree within 0.6 sd with correct
+interval widths. For weakly-constrained quantities it is **biased AND
+overconfident**: SOM residence time is 2.2× too short with an interval 5.5×
+too narrow. Those are precisely CARDAMOM's signature outputs (cf. Bloom et
+al. 2016 PNAS, decadal residence times) — a paper using the fast posterior
+would report a confidently wrong soil turnover.
+
+**Why this pattern:** it follows directly from the trapping diagnosis.
+Tightly-constrained parameters are pinned by the likelihood *inside* every
+chart, so local sampling gets them right. Weakly-constrained parameters need
+the full prior-scale ridge to be traversed, which trapped chains never do —
+so their spread is set by whichever chart a walker started in.
+
+**Proposed usage rule** (free to compute): trust the fast path for fluxes
+and well-identified parameters; do not quote its uncertainties for any
+parameter whose posterior width exceeds ~0.5 × its prior width. That ratio
+is itself the screening flag.
+
+### Between-chart weights by bridge sampling: exact in 2-D, collapses at 89-D
+
+The trapping diagnosis implies the missing quantity is the *relative mass*
+of each chart, which a kernel that cannot move between charts cannot supply.
+So estimate it instead of sampling it (`scripts/sarla_evidence.py`):
+tessellate into Mahalanobis-nearest-chart cells (disjoint ⇒ Σ Z_k = Z, no
+double counting), and bridge-sample each cell between the trapped chains'
+draws and that chart's Gaussian restricted to the cell.
+
+**Ground truth (2-D, three modes of known mass 0.5/0.3/0.2, chains unable to
+cross):** recovers **0.500 / 0.300 / 0.200** exactly — and gives the same
+answer from an adversarial initialization that put 83% of walkers in the
+smallest mode. The mechanism is correct.
+
+**NL-Loo (89-D): it makes things much worse.**
+
+| | unweighted | evidence-reweighted |
+| --- | --- | --- |
+| KL vs ADEMCMC (median) | 0.209 | **1.055** |
+| params with KL < 0.1 | 23/89 | 1/89 |
+| params with KL > 1 | 9/89 | 50/89 |
+| width ratio (median / 10th) | 0.91 / 0.57 | 0.64 / 0.30 |
+
+Cause is unambiguous from the built-in diagnostics: **one cell of 81 absorbs
+98.4% of the estimated mass** (mass ESS 1.0, weight ESS 0.012), and 20 cells
+received no estimate at all and were implicitly zeroed.
+
+**This is the third independent failure of density-derived chart weights in
+89-D** — after exp(P) weights and Laplace evidence weights — and the most
+informative one, because bridge sampling is the most principled of the three
+and is provably exact in low dimension. Uniform tiling remains the best
+weighting we have. The obstacle looks dimensional rather than
+methodological: cell-restricted evidence in 89-D is an integral no local
+estimator has yet pinned down.
+
 ### Still open
 
 - Localize the second overflow site (anchor 79) and re-measure.
+- Bridge-evidence stability check (split-half per cell) to settle whether
+  the 98.4% concentration is real or estimator variance — running.
+- A mixing mechanism that actually moves between charts (parallel tempering
+  across the atlas), since neither more walkers, longer chains, nor
+  post-hoc reweighting fixed the trapped-chain bias.
 - Re-run Newton arm C now that curvature is usable — H100 preferred
   (10× cheaper Newton steps there).
 - Seeded-ADEMCMC experiment: JAX modes + Laplace covariance as the C
