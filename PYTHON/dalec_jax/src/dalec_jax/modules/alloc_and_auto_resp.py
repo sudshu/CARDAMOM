@@ -9,6 +9,7 @@ CUE = NPP/GPP is UNGUARDED in C (GPP=0 → ±inf/NaN) and stays unguarded here.
 import jax.numpy as jnp
 
 from ..constants import DGCM_TK0C
+from .ad_guards import inv_exp_clamped
 
 
 def alloc_and_auto_resp_fluxes(deltat, TEMP, C_LIVE_W, C_LIVE_R, NSC, GPP, Rd,
@@ -27,11 +28,15 @@ def alloc_and_auto_resp_fluxes(deltat, TEMP, C_LIVE_W, C_LIVE_R, NSC, GPP, Rd,
     x_nmf = NSC_PLUS_GPP_RATE / jnp.where(
         POTENTIAL_AUTO_RESP_MAINTENANCE == 0, 1.0,
         POTENTIAL_AUTO_RESP_MAINTENANCE)
+    # SECOND-ORDER LEAK GUARD: inv_exp_clamped is bit-identical to
+    # 1/exp(min(x, LOG_DBL_MAX)) but its JVP is -w*dx, so forward tangents
+    # cannot hit exp(x)*dx = inf -> inf/inf = NaN when x sits just below
+    # the cutoff (see ad_guards.py; localized at x_gf = 707.79, step 86,
+    # site NL-Loo — NaN Hessians in the KNORR/labile directions).
     NONLEAF_MORTALITY_FACTOR = jnp.where(
         POTENTIAL_AUTO_RESP_MAINTENANCE == 0,
         0.0,
-        jnp.where(x_nmf > LOG_DBL_MAX, 0.0,
-                  1 / jnp.exp(jnp.minimum(x_nmf, LOG_DBL_MAX))))
+        jnp.where(x_nmf > LOG_DBL_MAX, 0.0, inv_exp_clamped(x_nmf)))
 
     AUTO_RESP_MAINTENANCE = (POTENTIAL_AUTO_RESP_MAINTENANCE
                              * (1 - NONLEAF_MORTALITY_FACTOR))
@@ -44,9 +49,10 @@ def alloc_and_auto_resp_fluxes(deltat, TEMP, C_LIVE_W, C_LIVE_R, NSC, GPP, Rd,
 
     x_gf = F_LABREL_SUPPLY / jnp.where(F_LABREL_DEMAND != 0,
                                        F_LABREL_DEMAND, 1.0)
+    # SECOND-ORDER LEAK GUARD (the empirically-implicated site): see NMF
+    # comment above / ad_guards.py.
     GF = jnp.where(F_LABREL_DEMAND != 0,
-                   jnp.where(x_gf > LOG_DBL_MAX, 0.0,
-                             1 / jnp.exp(jnp.minimum(x_gf, LOG_DBL_MAX))),
+                   jnp.where(x_gf > LOG_DBL_MAX, 0.0, inv_exp_clamped(x_gf)),
                    0.0)
 
     F_LABREL_ACTUAL = F_LABREL_DEMAND * (1 - GF)
