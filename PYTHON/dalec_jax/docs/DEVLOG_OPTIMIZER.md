@@ -547,6 +547,40 @@ shape ADEMCMC rather than to replace it.** ADEMCMC spends ~10⁸ evaluations
 per site, ~65 min of it before sampling even starts — both are costs the
 fast path can donate away without changing what the sampler produces.
 
+### Does the fast path actually reproduce the posterior? (2026-08-31)
+
+With a converged reference in hand, the screening posterior can finally be
+scored rather than assumed. Per-parameter marginal KL(ADEMCMC ‖ SARLA-guided)
+at NL-Loo, against a 40×-effort control run:
+
+| metric | 2,000 × 64 | 20,000 × 256 | ADEMCMC floor |
+| --- | --- | --- | --- |
+| split-half self-KL (Monte-Carlo error) | 0.204 | **0.048** | 0.022 |
+| KL vs ADEMCMC | 0.314 | **0.209** | — |
+| params with KL < 0.1 | 13/89 | 23/89 | — |
+| params with KL > 1 | 16/89 | 9/89 | — |
+| between-chain sd ÷ within-chain sd | 3.17 | 2.18 | 0.49 |
+| width ratio, 10th pct | 0.53 | 0.57 | 1.0 |
+
+**Half the original gap was noise; the rest is bias that sampling does not
+remove.** 40× the effort cut self-inconsistency 4× (to near the reference
+floor) but moved the disagreement with truth only 0.314 → 0.209 — now four
+times the sampler's own noise floor. Meanwhile chains still visit **1.2
+chart regions after 20,000 steps** and the between/within ratio is still
+2.18: the walkers never traverse the ridge. The pooled chart weights are
+therefore inherited from the *initialization*, and the posterior stays
+under-dispersed (10th-percentile width 0.57, unchanged across the 40×
+increase).
+
+**Retraction.** Earlier entries on this page described the 12-minute run as
+a "screening posterior". That is too strong. It is a good ridge/mode locator
+(C-verified best point improved to −190.6 in the long run) and an unreliable
+uncertainty product — and uncertainty is what CARDAMOM's science outputs
+depend on. The fix is structural, not computational: estimate the
+between-chart weights (thermodynamic integration or bridge sampling per
+chart, then reweight pooled local draws) instead of expecting a local kernel
+to sample them.
+
 ### Still open
 
 - Localize the second overflow site (anchor 79) and re-measure.
