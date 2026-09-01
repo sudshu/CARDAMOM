@@ -875,6 +875,9 @@ set of conclusions that then had to be withdrawn.
 - The pilot pipeline and its measured numbers: [FINDINGS.md](../FINDINGS.md)
 - Concept figures: [CONCEPTS.md](CONCEPTS.md)
 - SARLA design note: https://app.notion.com/p/3cd788b60530817a904ff70d7f6ef58b
+- **OSSE against a known truth at 89-D: [OSSE_SARLA.md](OSSE_SARLA.md)** —
+  the experiment that settles which sampler is right, rather than which
+  agrees with ADEMCMC
 - Toy target and harness: `scripts/toy_mid*.py`; NL-Loo transfer test:
   `scripts/nlloo_budget.py`, `scripts/nlloo_build_charts.py` (research repo)
 - This page exists because the defect was caught by a reader's question
