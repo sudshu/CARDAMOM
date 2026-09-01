@@ -669,17 +669,204 @@ weighting we have. The obstacle looks dimensional rather than
 methodological: cell-restricted evidence in 89-D is an integral no local
 estimator has yet pinned down.
 
+> **RETRACTED 2026-08-31 (later the same day).** The paragraph above is
+> wrong, and its error is instrumental rather than conceptual. Every number
+> in this subsection was measured on an atlas in which **24 of 81 charts had
+> NaN Hessians** and had silently degraded to prior-width isotropic
+> proposals — because the KNORR overflow guard and the `gate='none'`
+> curvature mode both existed, both were tested, and neither had been merged
+> into `jax-port`. With curvature restored (degraded charts 24 → 4),
+> reweighting at 89-D gives KL 0.243–0.679 and width ratios 0.89–0.95, not
+> KL ≈ 5 and width 0.19. It is still not a *win* — see
+> "Budget, allocation, and the transfer test" below, where it never beats
+> the raw sample — but "collapses" was a statement about broken equipment.
+> The split-half variance finding immediately above is unaffected: it was
+> about estimator stability, and it reproduces.
+
+## A mid-complexity toy with exact ground truth (2026-08-31)
+
+Every diagnosis above compares SARLA to ADEMCMC, so a disagreement never
+says which one is wrong. `scripts/toy_mid.py` removes that ambiguity: a
+24-D, 6-basin warped Gaussian mixture with a **closed-form density and exact
+i.i.d. sampling**, so both samplers are scored against truth, and a full
+comparison runs in ~30 s instead of 19 min.
+
+Two design points were needed before it reproduced anything, and both are
+findings in their own right.
+
+**Basin widths must be ANTI-correlated with basin mass.** The first version
+used random widths, and SARLA recovered the true weights almost exactly
+(mass TV 0.042). Multi-start seeding spreads charts in proportion to
+*basin-of-attraction volume*, which in that construction happened to track
+posterior mass, so the inherited-weight bias did not exist. Making heavy
+basins narrow and light basins wide breaks the coincidence. Any surrogate
+built without this will silently fail to reproduce the bug.
+
+**The identifiability split has to be designed in.** One direction is stiff
+in every basin *and* has the same value in every basin (the NBE analogue);
+one is weak and basin-dependent (the residence-time analogue).
+
+It then reproduces the NL-Loo signature:
+
+| | KL vs truth | width med/10th | mass TV | regions/chain |
+| --- | --- | --- | --- | --- |
+| truth (2nd sample) | 0.000 | 1.00 / 1.00 | 0.003 | — |
+| SARLA (guided RWM) | 0.054 | 0.84 / 0.78 | 0.197 | **1.02** |
+| DE-MC, matched budget | 0.188 | 0.79 / 0.60 | 0.211 | 1.53 |
+| DE-MC, 60× budget | 0.012 | 0.93 / 0.89 | 0.120 | 2.04 |
+
+The **KL ratio of SARLA to the converged reference is 4.5×; at NL-Loo it was
+4.4×** (0.209 vs 0.048). The flux column is flat across every method (bias
+0.00, CI ratio 1.00), reproducing "NBE agrees no matter who sampled it".
+
+Caveats: the DE-MC here is a reimplementation of the ADEMCMC *family*, not
+CARDAMOM's C sampler, and it needs a multi-start mode-search init (the
+analogue of the EDC search) or it never populates the narrow basins at all.
+Its max R-hat is 1.86 even at 60× budget, so it is a behavioural stand-in,
+not a converged reference — truth is the reference.
+
+### What the toy found: coverage, not weighting
+
+Substituting exact π-draws for the trapped chains' draws inside each cell,
+changing nothing else, moves mass TV from **0.555 to 0.034** against a 0.028
+exact-logZ floor. The bridge estimator is sound; its documented-but-untested
+input assumption is false. Two competing explanations were tested and both
+refuted: keep fractions are healthy (median 0.984) so the tessellation is
+fine, and the 7 unestimated cells hold 0.019 of the mass so dropping them is
+immaterial.
+
+The scan also exposed a real defect: every `logZ` carried a constant −26.37
+offset, exactly 24·ln 3 = Σ log(scale). The bridge runs in whitened space
+while the target was evaluated in z-space, with no Jacobian. It cancels in
+`reweight()`, so no conclusion changed, but `logZ` was not an evidence.
+Fixed; the 2-D toy now returns log 0.5 / log 0.3 / log 0.2 exactly.
+
+**Five mechanisms were then tried to lift coverage, and all five failed:**
+
+| mechanism | outcome |
+| --- | --- |
+| cell-restricted Metropolis | correct by construction, but small cells never equilibrate (203 seeds: radius 0.52 → 0.64 at 8000 steps) |
+| coarse (per-basin) tessellation | exact given good draws (logZ error 0.01); useless given trapped ones |
+| atlas-wide independence jumps | 0.002 acceptance |
+| region-local independence jumps | **0.008** acceptance — the destination set was never the problem; the Laplace charts are the wrong *shape* |
+| region-DE (ADEMCMC's mechanism) | rank-deficient below n≈d chains/region (coverage 0.04–0.08 at 10/region); never beats chart-RWM even at 48/region |
+
+The one thing that worked was not clever: **allocate chains per region, not
+per chart**. Chains were being handed out in proportion to charts-per-region,
+so the largest basin got ~35 and the smallest got **1**. Fixing that raised
+worst-basin coverage 10× and took the width ratio from 0.84/0.78 to
+1.02/0.94 — the posterior-width compression, gone, at zero cost.
+
+Also corrected here: region-DE refuted my premise that DE-MC's advantage is
+better within-basin preconditioning. It is not. DE-MC wins because its
+chains span *all* basins, so its difference vectors supply cross-basin
+moves; confined to one basin it has no edge.
+
+### Budget: the answer was mostly compute
+
+Scaling the best configuration 1×/4×/16×/64×:
+
+| arm | KLraw | wRaw | **KLrewt** | **wRewt** | TVrewt | worst coverage | evals |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ×1 | 0.042 | 1.02 | 0.115 | 0.69 | 0.300 | 0.20 | 0.19M |
+| ×4 | 0.036 | 1.11 | 0.049 | 0.80 | 0.229 | 0.37 | 0.77M |
+| ×16 | 0.034 | 1.14 | 0.026 | 0.84 | 0.151 | 0.50 | 3.07M |
+| ×64 | 0.035 | 1.15 | **0.020** | **0.86** | **0.143** | 0.67 | 12.29M |
+| ADEMCMC converged | | | 0.012 | 0.93 | 0.120 | | 11.5M |
+
+Nothing saturates. At matched cost SARLA reaches KL 0.020 / width 0.86 /
+TV 0.143 against ADEMCMC's 0.012 / 0.93 / 0.120 — close, still improving
+where ADEMCMC has converged.
+
+**A measurement error worth recording.** I first read KL and width off the
+*raw* sample and reported that KL saturates at 0.034. Balanced allocation
+distorts the raw mixture weights *on purpose* — that is the whole point of
+decoupling exploration from mass — so the raw sample was never the thing to
+score. Reweighted, KL falls 5.8× and does not saturate. Aggregate statistics
+on a deliberately-distorted sample are not a result.
+
+**Operational rule.** Reweighting *hurts* below a coverage crossover
+(×1: 0.042 → 0.115) and helps above it (×16: 0.034 → 0.026). NL-Loo's
+12-minute run sat well below that crossover, which is why every reweighting
+attempt there made things worse. The method was being used outside its
+regime.
+
+## Budget, allocation, and the transfer test at 89-D (2026-08-31)
+
+First attempt said the toy does not transfer. It was measured on an atlas
+with 24/81 charts blind (see the retraction above). After merging both
+fixes — `cc52936e` (overflow guard) and `f93aa7a9` (`gate='none'`
+curvature), equivalence suite 44 passed / 1 skipped — the atlas rebuilt with
+**4/81 degraded**, and all six arms were rerun with the per-chart control
+the first attempt lacked.
+
+| arm | KLraw | wRaw | w10 | KLrewt | wRewt | reg/ch | best P |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| bal ×1 | 0.460 | 1.19 | 0.78 | 0.661 | 0.95 | 1.00 | −213.60 |
+| bal ×4 | 0.322 | 1.12 | 0.82 | 0.535 | 0.92 | 1.12 | −213.41 |
+| bal ×16 | **0.226** | 1.11 | **0.83** | 0.268 | 0.93 | 1.12 | **−204.65** |
+| perchart ×1 | 0.633 | 0.97 | 0.60 | 0.679 | 0.89 | 1.00 | −214.46 |
+| perchart ×4 | 0.376 | 0.97 | 0.59 | 0.438 | 0.91 | 1.00 | −207.56 |
+| perchart ×16 | 0.231 | 0.96 | 0.65 | 0.243 | 0.91 | 1.00 | −205.37 |
+
+**Transfers.** Budget helps monotonically at 89-D for both allocations
+(0.460 → 0.226 and 0.633 → 0.231), no plateau. Balanced allocation fixes the
+width compression exactly as in the toy: 10th-percentile width 0.60 → 0.83
+(toy 0.78 → 0.94). Per-chart reproduces the historical narrow tail
+(0.59–0.65) — the mechanism behind the too-tight residence-time interval,
+and free to fix.
+
+**Does not transfer.** The density clustering degenerates here: region sizes
+`[1 1 1 69 2 1 3 1 1 1]`, byte-identical before and after the curvature fix,
+so it is a genuine property of this posterior and not an artifact. SARLA is
+*over*-dispersed at 89-D (coverage 3.5–6.3× vs ADEMCMC), the opposite of the
+toy's under-coverage, and unexplained. Chains still do not change region
+(reg/ch 1.00–1.12). Reweighting never beats raw here, though its penalty
+shrinks with budget (bal +0.201, +0.213, +0.042), so the crossover is
+directional but beyond 16×.
+
+**Caveat on cross-run comparison.** These KLs are binned in whitened space;
+the historical 0.209 was binned in log-parameter space. Histogram KL is not
+invariant under a change of variable, so **no claim** is made against 0.209.
+The six arms are internally comparable; the cross-run number is not.
+
+**Newly visible:** 5 of 81 chart centres are infeasible under the hard gate
+— the original atlas planted charts outside the EDC-feasible set. The
+builder reports this but does not yet enforce it, so those 5 receive ungated
+curvature that is strictly not the posterior's.
+
+### What the day changed, and the process lesson
+
+The recipe that survives is unglamorous: **allocate chains per region, and
+spend more compute.** Both were available on day one. Against that, five
+increasingly elaborate mechanisms were built and all five failed.
+
+The sharper lesson is about order of operations. A full hour was spent
+building an argument for why the toy's mechanism could not survive at 89-D —
+dimensionality, geometry, cell structure — when the actual cause was that a
+third of the atlas had no curvature, from a fix already written, already
+verified, and merely unmerged. Theorising about a surprising result before
+checking whether the instruments work is the wrong order, and it cost a full
+set of conclusions that then had to be withdrawn.
+
 ### Still open
 
-- Localize the second overflow site (anchor 79) and re-measure.
-- A mixing mechanism that actually moves between charts (parallel tempering
-  across the atlas), since neither more walkers, longer chains, nor
-  post-hoc reweighting fixed the trapped-chain bias.
+- Localize the third overflow site: 4 of 81 charts still have NaN Hessians
+  after both fixes (was 24), consistent with the unlocalized anchor-79 site.
+- Enforce, not merely report, hard-gate feasibility before taking `gate='none'`
+  curvature; and decide what to do about the 5 infeasible chart centres.
+- Explain the 89-D over-dispersion (3.5–6.3× vs ADEMCMC). It is the one
+  symptom the toy gets backwards, so the toy cannot be used to chase it.
+- A mixing mechanism that moves between regions. Six have now failed;
+  parallel tempering across the atlas remains untried.
 - Re-run Newton arm C now that curvature is usable — H100 preferred
   (10× cheaper Newton steps there).
 - Seeded-ADEMCMC experiment: JAX modes + Laplace covariance as the C
   sampler's starting state and proposal, measuring how much of the 32.7 h
   disappears with the product held fixed.
+- Revisit the science-impact table: its caveat should become a budget
+  threshold ("trust the fast path for weakly-constrained quantities above
+  N evaluations") rather than a blanket prohibition.
 
 ---
 
@@ -688,9 +875,13 @@ estimator has yet pinned down.
 - The pilot pipeline and its measured numbers: [FINDINGS.md](../FINDINGS.md)
 - Concept figures: [CONCEPTS.md](CONCEPTS.md)
 - SARLA design note: https://app.notion.com/p/3cd788b60530817a904ff70d7f6ef58b
+- Toy target and harness: `scripts/toy_mid*.py`; NL-Loo transfer test:
+  `scripts/nlloo_budget.py`, `scripts/nlloo_build_charts.py` (research repo)
 - This page exists because the defect was caught by a reader's question
   about a figure — the fourth time in this project that adversarial
   attention to a surprising detail overturned a headline number. The
-  ADEMCMC control at the top of this section is the fifth: it was run only
-  because a reader asked "how well does ADEMCMC do on NL-Loo?", and it
-  reversed a conclusion this page had already drawn.
+  ADEMCMC control is the fifth: it was run only because a reader asked
+  "how well does ADEMCMC do on NL-Loo?", and it reversed a conclusion this
+  page had already drawn. The 2026-08-31 retraction above is the sixth, and
+  the only one so far caused by unmerged code rather than by reasoning: the
+  fix that overturned it had been written, verified, and left on a branch.
