@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How temperature drives respiration in DALEC_1100</title>
+<style>
+  :root { --ink:#1f2933; --muted:#616e7c; --bg:#fafbfc; --card:#fff; --line:#e4e7eb;
+          --mr:#c0392b; --rd:#e67e22; --rh:#2980b9; --ch4:#8e44ad; --old:#7f8c8d; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color:var(--ink); background:var(--bg); margin:0; line-height:1.55; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 18px 80px; }
+  h1 { font-size: 1.9rem; margin-bottom: .2em; }
+  h2 { margin-top: 2.2em; border-bottom: 2px solid var(--line); padding-bottom:.2em; }
+  p.lead { font-size: 1.1rem; color: var(--muted); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin:18px 0; }
+  .controls { display:grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr)); gap:10px 22px; margin: 8px 0 14px; }
+  .controls label { display:block; font-size:.9rem; }
+  .controls input[type=range] { width:100%; }
+  .val { font-variant-numeric: tabular-nums; font-weight:600; }
+  canvas { width:100%; height:auto; display:block; }
+  .swatch { display:inline-block; width:12px; height:12px; border-radius:2px; vertical-align:middle; margin-right:4px; }
+  .mr{background:var(--mr)} .rd{background:var(--rd)} .rh{background:var(--rh)} .ch4{background:var(--ch4)} .old{background:var(--old)}
+  table { border-collapse: collapse; width:100%; font-size:.92rem; }
+  th, td { border-bottom:1px solid var(--line); padding:7px 8px; text-align:left; vertical-align:top; }
+  code { background:#eef1f4; padding:1px 5px; border-radius:4px; font-size:.9em; }
+  .note { border-left:4px solid #f39c12; background:#fff8e6; padding:10px 14px; border-radius:6px; }
+  .warn { border-left:4px solid var(--mr); background:#fdecea; padding:10px 14px; border-radius:6px; }
+  .readout { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:8px; margin-top:10px; font-size:.9rem; }
+  .readout div { background:#f4f6f8; border-radius:6px; padding:8px 10px; }
+  footer { color:var(--muted); font-size:.85rem; margin-top:50px; }
+  button { padding:6px 12px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How temperature drives respiration in DALEC_1100</h1>
+<p class="lead">
+A plant respires (burns carbon) to stay alive; soil microbes respire while eating dead
+material. Both speed up when it gets warmer. DALEC_1100 describes that speed-up with
+<b>four separate "Q10" dials</b>, each fitted from data. This page shows what a Q10 is,
+why four are needed, and how they behave over a synthetic year.
+</p>
+
+<h2>1. What is a Q10?</h2>
+<div class="card">
+<p>
+A Q10 answers one question: <i>if it gets 10&nbsp;°C warmer, how many times faster does this process run?</i>
+Q10 = 2 means "twice as fast per 10&nbsp;°C". The model writes it as a multiplier on the base rate:
+</p>
+<p style="text-align:center;font-size:1.15rem">
+f<sub>T</sub> = Q10<sup>(T − 25 °C) / 10</sup>
+</p>
+<p>
+At 25&nbsp;°C the multiplier is exactly 1. Above 25&nbsp;°C it grows, below it shrinks.
+Drag the dials: every respiration flux in DALEC_1100 has its own Q10 and its own prior range of 1–5.
+</p>
+
+<div class="controls" id="q10controls">
+  <label><span class="swatch mr"></span>Maintenance respiration Q10 (<code>rauto_mr_q10</code>): <span class="val" id="v_mr"></span>
+    <input type="range" id="q_mr" min="1" max="5" step="0.05" value="2.0"></label>
+  <label><span class="swatch rd"></span>Leaf dark respiration Q10 (<code>rauto_mrd_q10</code>): <span class="val" id="v_rd"></span>
+    <input type="range" id="q_rd" min="1" max="5" step="0.05" value="1.8"></label>
+  <label><span class="swatch rh"></span>Soil (heterotrophic) CO<sub>2</sub> Q10 (<code>Q10rhco2</code>): <span class="val" id="v_rh"></span>
+    <input type="range" id="q_rh" min="1" max="5" step="0.05" value="2.2"></label>
+  <label><span class="swatch ch4"></span>Methane production Q10 (<code>Q10ch4</code>): <span class="val" id="v_ch4"></span>
+    <input type="range" id="q_ch4" min="1" max="5" step="0.05" value="3.0"></label>
+</div>
+<canvas id="c_ft" width="920" height="380"></canvas>
+<p style="font-size:.9rem;color:var(--muted)">
+Grey dashed line: the older DALEC990 (DifferLand) form, exp(k·(T − T<sub>mean</sub>)), which is referenced to
+the site's mean temperature rather than 25&nbsp;°C and has just one dial shared by all soil pools. Toggle:
+<button id="toggle990">show / hide DALEC990</button>
+</p>
+</div>
+
+<h2>2. Why four dials, not one?</h2>
+<div class="card">
+<p>Because the four fluxes see <b>different temperatures</b> and are limited by <b>different things</b>:</p>
+<table>
+<tr><th>Flux</th><th>Which temperature?</th><th>Reference</th><th>What else limits it?</th><th>Code</th></tr>
+<tr><td><span class="swatch mr"></span><b>Maintenance</b> of wood + roots</td>
+    <td>Daily mean <b>air</b> temperature</td><td>25 °C</td>
+    <td>Available sugars (NSC). If the plant can't pay the bill, respiration saturates and tissue dies instead.</td>
+    <td><code>ALLOC_AND_AUTO_RESP_FLUXES.c:47</code></td></tr>
+<tr><td><span class="swatch rd"></span><b>Leaf dark respiration</b> R<sub>d</sub></td>
+    <td>Daily mean <b>air</b> temperature</td><td>25 °C</td>
+    <td>Scaled by V<sub>cmax25</sub> (a fixed leaf property) and again capped by NSC.</td>
+    <td><code>LIU_AN_ET_REFACTOR.c:131,157</code></td></tr>
+<tr><td><span class="swatch rh"></span><b>Soil CO<sub>2</sub></b> from litter, woody debris, SOM</td>
+    <td><b>Soil layer-1</b> temperature (lags air, damped)</td><td>25 °C</td>
+    <td>Multiplied by the <b>liquid water fraction</b> — frozen soil respires ~nothing — and by moisture scalars (aerobic vs anaerobic).</td>
+    <td><code>HET_RESP_RATES_JCR.c</code>, <code>DALEC_1100.c:910</code></td></tr>
+<tr><td><span class="swatch ch4"></span><b>Methane</b> fraction of anaerobic decay</td>
+    <td><b>Soil layer-1</b> temperature</td><td>25 °C</td>
+    <td>Liquid fraction; capped so CH<sub>4</sub> never exceeds the anaerobic carbon released.</td>
+    <td><code>HET_RESP_RATES_JCR.c</code></td></tr>
+<tr><td><b>Growth respiration</b></td><td colspan="2"><i>none</i></td>
+    <td>Fixed cost per gram of new tissue: (1 − g<sub>r</sub>)/g<sub>r</sub>. Warmth only reaches it via GPP.</td>
+    <td><code>ALLOC_AND_AUTO_RESP_FLUXES.c:138</code></td></tr>
+</table>
+</div>
+
+<h2>3. A synthetic year</h2>
+<div class="card">
+<p>
+The drivers below are made up but sized like a temperate forest: air temperature swings −5 to 27&nbsp;°C,
+soil temperature follows with a ~3-week lag and half the amplitude, soil water freezes below 0&nbsp;°C,
+LAI and GPP peak in summer. Carbon pools: wood 8000, fine roots 400, litter 300, SOM 6000 gC&nbsp;m<sup>−2</sup>.
+Use the sliders above (Q10s) and below (carbon supply) and watch how differently the four fluxes respond
+to the <i>same</i> weather.
+</p>
+<div class="controls">
+  <label>Starting sugar reserve NSC (gC m<sup>−2</sup>): <span class="val" id="v_nsc"></span>
+    <input type="range" id="nsc0" min="20" max="1000" step="10" value="400"></label>
+  <label>Fine-root carbon (gC m<sup>−2</sup>) — sets the maintenance bill: <span class="val" id="v_root"></span>
+    <input type="range" id="croot" min="200" max="4000" step="50" value="400"></label>
+  <label>Soil-temperature lag (days): <span class="val" id="v_lag"></span>
+    <input type="range" id="lag" min="0" max="45" step="1" value="20"></label>
+  <label>Freeze switch (liquid fraction × Rh): <input type="checkbox" id="useLF" checked></label>
+  <label>NSC cap on autotrophic respiration: <input type="checkbox" id="useCap" checked></label>
+</div>
+
+<h3 style="margin:.4em 0">Drivers</h3>
+<canvas id="c_drv" width="920" height="300"></canvas>
+<h3 style="margin:.4em 0">Temperature multipliers f<sub>T</sub> that each flux actually experiences</h3>
+<canvas id="c_ftyear" width="920" height="320"></canvas>
+<h3 style="margin:.4em 0">Resulting fluxes (gC m<sup>−2</sup> d<sup>−1</sup>)</h3>
+<canvas id="c_flux" width="920" height="360"></canvas>
+<div class="readout" id="readout"></div>
+<p class="note" style="margin-top:14px">
+<b>Things to try.</b> (1) Set all four Q10s equal — the curves still differ, because the soil is colder and
+lagged and shuts off when frozen. (2) Push fine-root carbon to 3000 and maintenance Q10 to 4, then drop the NSC reserve:
+the red dashed "potential" line runs away with temperature but the solid "actual" line can't follow — the model
+turns the shortfall into tissue mortality (count shown below the plot). (3) Turn off the freeze switch and watch winter soil respiration reappear.
+</p>
+</div>
+
+<h2>4. The maintenance-respiration cap, in one picture</h2>
+<div class="card">
+<p>
+The Q10 sets the <i>demand</i>. What the plant can actually pay is
+R = R<sub>pot</sub>·(1 − e<sup>−S/R<sub>pot</sub></sup>), where S = NSC + GPP − R<sub>d</sub> is the day's carbon supply.
+When supply is generous (S ≫ R<sub>pot</sub>) you get the full Q10 curve; when it's tight, the curve bends flat.
+This is why the "effective Q10" you would measure from model output is lower than the parameter in hot, dry,
+or leafless periods.
+</p>
+<div class="controls">
+  <label>Daily carbon supply S (gC m<sup>−2</sup> d<sup>−1</sup>): <span class="val" id="v_S"></span>
+    <input type="range" id="S" min="0.2" max="12" step="0.1" value="3"></label>
+</div>
+<canvas id="c_cap" width="920" height="320"></canvas>
+</div>
+
+<h2>5. A wrinkle worth knowing about (checked against the upstream code)</h2>
+<div class="card">
+<p>
+Several DALEC versions carry a sanity check ("EDC 4": fine roots must turn over faster than soil organic
+matter <i>at the site's mean temperature</i>). The code for it is
+<code>t_root &lt; t_som · Q10<sup>(T<sub>mean</sub>/10)</sup></code> with T<sub>mean</sub> in °C — i.e. a
+temperature multiplier referenced to <b>0&nbsp;°C</b>. That matched the original 2015 model, whose rate
+factor was e<sup>Θ·T</sup>. But every model since DALEC_811 evaluates the multiplier relative to the
+site mean (so it equals 1 at T<sub>mean</sub>), and DALEC_1100 references it to 25&nbsp;°C. The check
+was never updated to follow.
+</p>
+<p class="note">
+<b>Does it matter for DALEC_1100?</b> No — but for an unexpected reason. In DALEC_1100 the file containing
+this check (<code>EDC1_1100.c</code>) is never called: <code>MODEL_INFO_1100.c:37</code> has the hook
+commented out, and 1100 uses a newer generic EDC list that has no root-vs-SOM temperature test at all.
+The line is dead code there. Consistent with that, 3.5% of accepted NL-Loo posterior draws violate it.
+</p>
+<p class="warn">
+<b>Where it is live:</b> DALEC_1010–1012 and 1101–1105, 1110, whose models use the
+mean-referenced form <code>Q10^((T − T_mean)/10)</code>. There the check as written is stricter than its
+stated intent by a factor Q10<sup>T<sub>mean</sub>/10</sup> — about 2× at a 10&nbsp;°C site with Q10 = 2,
+about 5× at 25&nbsp;°C — rejecting parameter sets in which roots do turn over faster than SOM.
+(<code>EDC1_1101.c:64</code> and siblings; present on upstream <code>main</code>.)
+</p>
+<canvas id="c_edc" width="920" height="260"></canvas>
+<p style="font-size:.9rem;color:var(--muted)">Multiplier the check uses (red) versus the one the mean-referenced
+models actually apply at T<sub>mean</sub> (blue, always 1), as a function of Q10 at a 10.7&nbsp;°C site.</p>
+</div>
+
+<h2>6. Summary</h2>
+<div class="card">
+<ul>
+<li>All respiration temperature responses in DALEC_1100 are Q10 curves referenced to 25&nbsp;°C, with priors of 1–5.</li>
+<li>Plant fluxes use <b>air</b> temperature; soil fluxes use <b>layer-1 soil</b> temperature times the <b>liquid fraction</b>.</li>
+<li>Plant respiration is additionally <b>capped by carbon supply</b>, so its effective temperature sensitivity is state-dependent.</li>
+<li>Growth respiration has no temperature dependence of its own.</li>
+<li>The older DALEC990 used one anomaly-referenced exponential for soil only, and a fixed fraction of GPP for plant respiration — no temperature term at all.</li>
+</ul>
+</div>
+
+<footer>
+Synthetic drivers and pools are illustrative, not observations. Formulas follow the CARDAMOM source for
+DALEC_1100 (<code>projects/CARDAMOM_MODELS/DALEC/</code>). Page generated 2026-09-01.
+</footer>
+</main>
+
+<script>
+// ---------- tiny plotting helper ----------
+function plot(canvas, series, opts) {
+  const c = canvas.getContext('2d'); const W = canvas.width, H = canvas.height;
+  const m = {l:62, r:16, t:14, b:44}; c.clearRect(0,0,W,H);
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  for (const s of series) for (let i=0;i<s.x.length;i++){ const y=s.y[i]; if(!isFinite(y))continue;
+    xmin=Math.min(xmin,s.x[i]); xmax=Math.max(xmax,s.x[i]); ymin=Math.min(ymin,y); ymax=Math.max(ymax,y);}
+  if (opts.ymin!==undefined) ymin=opts.ymin; if (opts.ymax!==undefined) ymax=opts.ymax;
+  if (ymax===ymin) ymax=ymin+1;
+  const sx = x=> m.l + (x-xmin)/(xmax-xmin)*(W-m.l-m.r);
+  const sy = y=> H-m.b - (y-ymin)/(ymax-ymin)*(H-m.t-m.b);
+  // grid + ticks
+  c.strokeStyle='#e4e7eb'; c.fillStyle='#616e7c'; c.font='12px sans-serif'; c.lineWidth=1;
+  const yt = niceTicks(ymin,ymax,5), xt = opts.xticks || niceTicks(xmin,xmax,8);
+  c.textAlign='right'; c.textBaseline='middle';
+  for (const v of yt){ c.beginPath(); c.moveTo(m.l,sy(v)); c.lineTo(W-m.r,sy(v)); c.stroke(); c.fillText(fmt(v), m.l-6, sy(v)); }
+  c.textAlign='center'; c.textBaseline='top';
+  for (const v of xt){ const lab = opts.xlabels? opts.xlabels(v): fmt(v); c.fillText(lab, sx(v), H-m.b+6); }
+  c.fillStyle='#1f2933'; c.font='13px sans-serif';
+  c.fillText(opts.xlabel||'', (m.l+W-m.r)/2, H-20);
+  c.save(); c.translate(14, (m.t+H-m.b)/2); c.rotate(-Math.PI/2); c.textBaseline='middle'; c.fillText(opts.ylabel||'',0,0); c.restore();
+  // optional reference lines
+  for (const r of (opts.hlines||[])){ c.strokeStyle=r.color||'#999'; c.setLineDash([3,4]); c.beginPath(); c.moveTo(m.l,sy(r.y)); c.lineTo(W-m.r,sy(r.y)); c.stroke(); c.setLineDash([]); }
+  for (const r of (opts.vlines||[])){ c.strokeStyle=r.color||'#999'; c.setLineDash([3,4]); c.beginPath(); c.moveTo(sx(r.x),m.t); c.lineTo(sx(r.x),H-m.b); c.stroke(); c.setLineDash([]); }
+  // series
+  for (const s of series){ c.strokeStyle=s.color; c.lineWidth=s.width||2; c.setLineDash(s.dash||[]);
+    c.beginPath(); let pen=false;
+    for (let i=0;i<s.x.length;i++){ const y=s.y[i]; if(!isFinite(y)){pen=false;continue;}
+      if(!pen){c.moveTo(sx(s.x[i]),sy(y));pen=true;} else c.lineTo(sx(s.x[i]),sy(y)); }
+    c.stroke(); c.setLineDash([]); }
+  // legend
+  let lx = m.l+10, ly = m.t+8; c.font='12px sans-serif'; c.textAlign='left'; c.textBaseline='middle';
+  for (const s of series){ if(!s.label) continue; c.strokeStyle=s.color; c.lineWidth=3; c.setLineDash(s.dash||[]);
+    c.beginPath(); c.moveTo(lx,ly); c.lineTo(lx+22,ly); c.stroke(); c.setLineDash([]);
+    c.fillStyle='#1f2933'; c.fillText(s.label, lx+28, ly); lx += 40 + c.measureText(s.label).width;
+    if (lx > W-180){ lx = m.l+10; ly += 16; } }
+}
+function niceTicks(a,b,n){ const span=b-a, raw=span/n, p=Math.pow(10,Math.floor(Math.log10(raw)));
+  const step=[1,2,2.5,5,10].map(k=>k*p).find(k=>span/k<=n)||10*p; const out=[];
+  for(let v=Math.ceil(a/step)*step; v<=b+1e-9; v+=step) out.push(+v.toFixed(10)); return out; }
+function fmt(v){ return Math.abs(v)>=100? v.toFixed(0) : Math.abs(v)>=10? v.toFixed(1): v.toFixed(2).replace(/\.?0+$/,''); }
+const $ = id => document.getElementById(id);
+const monthStarts=[0,31,59,90,120,151,181,212,243,273,304,334];
+const monthNames=['J','F','M','A','M','J','J','A','S','O','N','D'];
+
+// ---------- synthetic drivers (deterministic "noise") ----------
+const N=365, day=[...Array(N).keys()];
+function rnd(seed){ let s=seed; return ()=>{ s=(s*1664525+1013904223)%4294967296; return s/4294967296-0.5; }; }
+const r1=rnd(7), r2=rnd(13);
+const Tair = day.map(d=> 11 + 16*Math.sin(2*Math.PI*(d-110)/365) + 3.5*r1() + 1.5*r1());
+function soilTemp(lag){ // damped, lagged, smoothed air temp
+  const out=[]; for (let d=0;d<N;d++){ let s=0,w=0; for(let k=0;k<25;k++){ const j=((d-lag-k)%N+N)%N; s+=Tair[j]; w++; } 
+    out.push(11 + 0.55*(s/w-11)); } return out; }
+const LAI = day.map(d=> 0.8 + 4.2*Math.max(0, Math.sin(2*Math.PI*(d-105)/365))**1.3);
+const GPP = day.map((d,i)=> Math.max(0, (LAI[i]/5)*(9*Math.max(0,Math.sin(2*Math.PI*(d-100)/365)) + 0.6) * (1+0.15*r2())));
+const Tmean = Tair.reduce((a,b)=>a+b)/N;
+// pools & rates (gC m-2, d-1)
+const C_wood=8000, C_lit=300, C_som=6000, C_cwd=400;
+const mr_w=8e-6, mr_r=4e-3, t_lit=5e-3, t_som=1.5e-4, t_cwd=8e-4, vcmax25=45, canopyRdsf=0.012, r_ch4=0.02, fW=0.8;
+
+function q10f(q,T){ return Math.pow(q,(T-25)/10); }
+function liquidFrac(Ts){ return 1/(1+Math.exp(-(Ts-0.5)/0.9)); }
+function canopyScale(lai){ const k=0.5; return (1-Math.exp(-k*lai))/k; }
+function state(){ return { q_mr:+$('q_mr').value, q_rd:+$('q_rd').value, q_rh:+$('q_rh').value, q_ch4:+$('q_ch4').value,
+  nsc0:+$('nsc0').value, croot:+$('croot').value, lag:+$('lag').value, useLF:$('useLF').checked, useCap:$('useCap').checked }; }
+
+let show990=true;
+$('toggle990').onclick=()=>{show990=!show990; drawFT();};
+
+function drawFT(){
+  const s=state(); const T=[]; for(let t=-10;t<=40;t+=0.5) T.push(t);
+  const ser=[
+    {x:T,y:T.map(t=>q10f(s.q_mr,t)),color:'#c0392b',label:`maintenance Q10=${s.q_mr.toFixed(2)}`},
+    {x:T,y:T.map(t=>q10f(s.q_rd,t)),color:'#e67e22',label:`leaf Rd Q10=${s.q_rd.toFixed(2)}`},
+    {x:T,y:T.map(t=>q10f(s.q_rh,t)),color:'#2980b9',label:`soil CO2 Q10=${s.q_rh.toFixed(2)}`},
+    {x:T,y:T.map(t=>q10f(s.q_ch4,t)),color:'#8e44ad',label:`CH4 Q10=${s.q_ch4.toFixed(2)}`}];
+  if(show990) ser.push({x:T,y:T.map(t=>Math.exp(0.0693*(t-Tmean))),color:'#7f8c8d',dash:[6,4],label:`DALEC990 exp(0.069·(T−${Tmean.toFixed(0)}°C))`});
+  plot($('c_ft'),ser,{xlabel:'temperature (°C)',ylabel:'rate multiplier fT',ymin:0,ymax:4,
+    hlines:[{y:1,color:'#aaa'}],vlines:[{x:25,color:'#aaa'}]});
+  for (const k of ['mr','rd','rh','ch4']) $('v_'+k).textContent=(+$('q_'+k).value).toFixed(2);
+}
+
+function simulate(){
+  const s=state(); const Ts=soilTemp(s.lag); const LF=Ts.map(liquidFrac);
+  const out={Ts,LF,fmr:[],frd:[],frh:[],fch4:[],Rm_pot:[],Rm:[],Rd:[],Rh:[],CH4:[],mort:[],NSC:[]};
+  let NSC=s.nsc0;
+  for(let i=0;i<N;i++){
+    const fmr=q10f(s.q_mr,Tair[i]), frd=q10f(s.q_rd,Tair[i]);
+    const lf = s.useLF? LF[i]:1;
+    const frh=q10f(s.q_rh,Ts[i])*lf, fch4=q10f(s.q_ch4,Ts[i])*lf;
+    // leaf dark respiration (umol m-2 s-1 -> gC m-2 d-1), NSC-capped like LIU_AN_ET_REFACTOR.c:182
+    const Rd_pot = canopyRdsf*vcmax25*frd*canopyScale(LAI[i])*12e-6*86400;
+    const leafMort = s.useCap && Rd_pot>0 ? Math.exp(-NSC/Rd_pot) : 0;
+    const Rd = Rd_pot*(1-leafMort);
+    // maintenance, NSC-capped like ALLOC_AND_AUTO_RESP_FLUXES.c:64
+    const Rm_pot = (mr_w*C_wood + mr_r*s.croot)*fmr;
+    const supply = Math.max(0, NSC + GPP[i] - Rd);
+    const mort = s.useCap && Rm_pot>0 ? Math.exp(-supply/Rm_pot) : 0;
+    const Rm = s.useCap ? Rm_pot*(1-mort) : Rm_pot;
+    // growth: spend 4%/d of leftover NSC, with growth respiration at gr=0.75
+    const leftover=Math.max(0, supply-Rm); const growth=0.015*leftover*Math.min(1, GPP[i]/3); const Rg=(1-0.75)/0.75*growth;
+    NSC = Math.max(0, supply - Rm - growth - Rg);
+    // heterotrophic (aerobic path only, fixed moisture scalar) + CH4 fraction of a small anaerobic share
+    const Rh = (C_lit*t_lit + C_som*t_som + C_cwd*t_cwd)*frh*fW;
+    const anaerobic = 0.08*(C_lit*t_lit + C_som*t_som + C_cwd*t_cwd)*frh;
+    const fCH4 = Math.min(r_ch4*fch4, 1);
+    out.fmr.push(fmr); out.frd.push(frd); out.frh.push(frh); out.fch4.push(fch4);
+    out.Rm_pot.push(Rm_pot); out.Rm.push(Rm); out.Rd.push(Rd); out.Rh.push(Rh); out.CH4.push(anaerobic*fCH4);
+    out.mort.push(mort); out.NSC.push(NSC);
+  }
+  return out;
+}
+const xopts={xticks:monthStarts, xlabels:v=>monthNames[monthStarts.indexOf(v)]||'', xlabel:'month'};
+function drawYear(){
+  const s=state(); const o=simulate();
+  $('v_nsc').textContent=s.nsc0; $('v_lag').textContent=s.lag; $('v_root').textContent=s.croot;
+  plot($('c_drv'),[
+    {x:day,y:Tair,color:'#c0392b',label:'air temperature (°C)'},
+    {x:day,y:o.Ts,color:'#2980b9',label:'soil layer-1 temperature (°C)'},
+    {x:day,y:o.LF.map(v=>v*10),color:'#16a085',dash:[4,3],label:'liquid fraction ×10'},
+    {x:day,y:GPP,color:'#27ae60',label:'GPP (gC m⁻² d⁻¹)'},
+    {x:day,y:LAI,color:'#7f8c8d',dash:[2,3],label:'LAI'}],
+    {...xopts, ylabel:'', hlines:[{y:0,color:'#aaa'}]});
+  plot($('c_ftyear'),[
+    {x:day,y:o.fmr,color:'#c0392b',label:'maintenance (air T)'},
+    {x:day,y:o.frd,color:'#e67e22',label:'leaf Rd (air T)'},
+    {x:day,y:o.frh,color:'#2980b9',label:'soil CO2 (soil T × liquid frac)'},
+    {x:day,y:o.fch4,color:'#8e44ad',label:'CH4 (soil T × liquid frac)'}],
+    {...xopts, ylabel:'fT multiplier', ymin:0, hlines:[{y:1,color:'#aaa'}]});
+  plot($('c_flux'),[
+    {x:day,y:o.Rm_pot,color:'#c0392b',dash:[5,4],width:1.5,label:'maintenance potential (pure Q10)'},
+    {x:day,y:o.Rm,color:'#c0392b',label:'maintenance actual (NSC-capped)'},
+    {x:day,y:o.Rd,color:'#e67e22',label:'leaf dark respiration'},
+    {x:day,y:o.Rh,color:'#2980b9',label:'soil CO2'},
+    {x:day,y:o.CH4.map(v=>v*100),color:'#8e44ad',label:'CH4 ×100'}],
+    {...xopts, ylabel:'gC m⁻² d⁻¹', ymin:0});
+  const sum=a=>a.reduce((p,q)=>p+q,0);
+  const effQ10=(f,T)=>{ // regress log flux on temperature over the year
+    const xs=[],ys=[]; for(let i=0;i<N;i++){ if(f[i]>1e-6){xs.push(T[i]);ys.push(Math.log(f[i]));} }
+    const mx=sum(xs)/xs.length,my=sum(ys)/ys.length; let sxy=0,sxx=0; for(let i=0;i<xs.length;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sxx+=(xs[i]-mx)**2;}
+    return Math.exp(10*sxy/sxx); };
+  $('readout').innerHTML=`
+    <div>Annual GPP<br><b>${sum(GPP).toFixed(0)}</b> gC m⁻²</div>
+    <div>Annual maintenance R<br><b>${sum(o.Rm).toFixed(0)}</b> (potential ${sum(o.Rm_pot).toFixed(0)})</div>
+    <div>Annual leaf Rd<br><b>${sum(o.Rd).toFixed(0)}</b></div>
+    <div>Annual soil CO₂<br><b>${sum(o.Rh).toFixed(0)}</b></div>
+    <div>Annual CH₄-C<br><b>${sum(o.CH4).toFixed(2)}</b></div>
+    <div>Effective maintenance Q10 vs air T<br><b>${effQ10(o.Rm,Tair).toFixed(2)}</b> (parameter ${s.q_mr.toFixed(2)})</div>
+    <div>Effective soil Q10 vs <i>air</i> T<br><b>${effQ10(o.Rh,Tair).toFixed(2)}</b> (parameter ${s.q_rh.toFixed(2)})</div>
+    <div>Days with mortality factor &gt; 0.1<br><b>${o.mort.filter(v=>v>0.1).length}</b></div>`;
+}
+function drawCap(){
+  const S=+$('S').value; $('v_S').textContent=S.toFixed(1);
+  const T=[]; for(let t=-5;t<=40;t+=0.5) T.push(t);
+  const base=(mr_w*C_wood+mr_r*(+$('croot').value)); const q=+$('q_mr').value;
+  const pot=T.map(t=>base*q10f(q,t)); const act=pot.map(p=>p*(1-Math.exp(-S/p)));
+  plot($('c_cap'),[
+    {x:T,y:pot,color:'#c0392b',dash:[5,4],label:`potential = base × Q10^((T−25)/10), Q10=${q.toFixed(2)}`},
+    {x:T,y:act,color:'#c0392b',label:'actual = potential × (1 − exp(−S/potential))'},
+    ],{xlabel:'air temperature (°C)',ylabel:'gC m⁻² d⁻¹',ymin:0,hlines:[{y:S,color:'#27ae60'}]});
+  const c=$('c_cap').getContext('2d'); c.fillStyle='#27ae60'; c.font='12px sans-serif'; c.textAlign='right';
+  c.fillText('supply S', $('c_cap').width-20, 30);
+}
+function drawEDC(){
+  const Q=[]; for(let q=1;q<=5;q+=0.05) Q.push(q);
+  const Tm=10.7;
+  plot($('c_edc'),[
+    {x:Q,y:Q.map(q=>1),color:'#2980b9',label:`model (mean-referenced): Q10^((T−T_mean)/10) = 1 at T_mean`},
+    {x:Q,y:Q.map(q=>Math.pow(q,Tm/10)),color:'#c0392b',label:`EDC 4 as coded: Q10^(T_mean/10), T_mean=${Tm}°C`}],
+    {xlabel:'Q10rhco2',ylabel:'fT used',ymin:0});
+}
+document.querySelectorAll('input').forEach(el=>el.addEventListener('input',()=>{drawFT();drawYear();drawCap();}));
+drawFT(); drawYear(); drawCap(); drawEDC();
+</script>
+</body>
+</html>
